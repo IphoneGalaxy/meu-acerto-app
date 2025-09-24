@@ -1,8 +1,8 @@
-const CACHE_NAME = 'meu-acerto-cache-v1';
-// Adicione aqui os URLs dos ficheiros principais da sua aplicação que quer guardar em cache.
+const CACHE_NAME = 'meu-acerto-cache-v2';
+// Atualize aqui os URLs para o nome correto do seu repositório.
 const urlsToCache = [
-  '/controle-gastos-app/',
-  '/controle-gastos-app/index.html'
+  '/meu-acerto-app/',
+  '/meu-acerto-app/index.html'
 ];
 
 // Evento de instalação: abre o cache e armazena os ficheiros principais.
@@ -46,3 +46,4 @@ self.addEventListener('activate', event => {
     })
   );
 });
+
