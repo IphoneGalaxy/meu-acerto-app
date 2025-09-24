@@ -92,7 +92,7 @@
             );
         };
         
-        const Dashboard = ({ user, onLogout, db, appId }) => {
+        const Dashboard = ({ user, onLogout, db }) => {
             const [expenses, setExpenses] = useState([]);
             const [installmentPlans, setInstallmentPlans] = useState([]);
             const [isModalOpen, setIsModalOpen] = useState(false);
@@ -109,17 +109,18 @@
             };
             const theme = themes[user] || themes['Guilherme'];
 
-            const expensesColRef = useMemo(() => collection(db, `artifacts/${appId}/public/data/expenses`), [db, appId]);
-            const plansColRef = useMemo(() => collection(db, `artifacts/${appId}/public/data/installmentPlans`), [db, appId]);
+            const expensesColRef = useMemo(() => collection(db, 'expenses'), [db]);
+            const plansColRef = useMemo(() => collection(db, 'installmentPlans'), [db]);
 
             useEffect(() => {
+                if (!db) return;
                 const unsubscribeExpenses = onSnapshot(expensesColRef, snapshot => setExpenses(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
                 const unsubscribePlans = onSnapshot(plansColRef, snapshot => setInstallmentPlans(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
                 return () => { unsubscribeExpenses(); unsubscribePlans(); };
-            }, [expensesColRef, plansColRef]);
+            }, [db, expensesColRef, plansColRef]);
 
             useEffect(() => {
-                if (!db) return; // Don't run if db is not ready
+                if (!db) return; 
 
                 const generateMissingInstallments = async () => {
                     const today = new Date();
@@ -166,7 +167,7 @@
                     }
                 };
                 generateMissingInstallments();
-            }, [installmentPlans, expenses, db, expensesColRef]); // Rerun when data changes
+            }, [installmentPlans, expenses, db, expensesColRef]); 
 
             const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
             const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
@@ -192,7 +193,7 @@
             const updateExpense = async (updatedExpense) => {
                 const { id, ...dataToUpdate } = updatedExpense;
                 try {
-                    const expenseDocRef = doc(db, `artifacts/${appId}/public/data/expenses`, id);
+                    const expenseDocRef = doc(db, 'expenses', id);
                     await updateDoc(expenseDocRef, dataToUpdate);
                 } catch (error) { console.error("Error updating document: ", error); }
             };
@@ -200,7 +201,7 @@
             const deleteExpense = async (id) => {
                 if (confirm('Tem certeza que deseja excluir este lançamento?')) {
                     try {
-                        await deleteDoc(doc(db, `artifacts/${appId}/public/data/expenses`, id));
+                        await deleteDoc(doc(db, 'expenses', id));
                     } catch (error) { console.error("Error deleting document: ", error); }
                 }
             };
@@ -459,7 +460,6 @@
             const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
             const [db, setDb] = useState(null);
             const [auth, setAuth] = useState(null);
-            const [appId, setAppId] = useState(null);
             const [error, setError] = useState(null);
 
             useEffect(() => {
@@ -476,7 +476,7 @@
                 };
                 // ===================================================================
                 
-                if (!firebaseConfig.apiKey) {
+                if (!firebaseConfig.apiKey.includes("AIza")) { // Simple check if config is placeholder
                     setError("Configuração do Firebase não encontrada. Por favor, edite o arquivo index.html e cole as credenciais do seu projeto.");
                     return;
                 }
@@ -488,12 +488,11 @@
                     
                     setDb(firestoreDb);
                     setAuth(firebaseAuth);
-                    setAppId(firebaseConfig.projectId);
                     
                     const authenticate = async () => {
                         try {
                            await signInAnonymously(firebaseAuth);
-                        } catch (error) { console.error("Firebase authentication failed:", error); setError("Falha na autenticação com o Firebase.");}
+                        } catch (error) { console.error("Firebase authentication failed:", error); setError("Falha na autenticação com o Firebase. Verifique se o Login Anônimo está habilitado no seu projeto.");}
                     };
                     authenticate();
                 } catch (error) { console.error("Failed to initialize Firebase:", error); setError("Falha ao inicializar o Firebase. Verifique suas credenciais."); }
@@ -512,13 +511,13 @@
                 return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
             }
 
-            if (!db || !auth || !appId) {
+            if (!db || !auth) {
                 return <div className="min-h-screen flex items-center justify-center text-slate-500">Conectando ao servidor...</div>;
             }
 
             if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />;
             
-            return <Dashboard user={currentUser} onLogout={handleLogout} db={db} appId={appId} />;
+            return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
         };
         
         window.onload = () => {
