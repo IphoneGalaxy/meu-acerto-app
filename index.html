@@ -27,7 +27,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
-    <meta name="theme-color" content="#1e29b3" />
+    <meta name="theme-color" content="#1e2b3" />
     <link rel="apple-touch-icon" href="https://placehold.co/180x180/1e29b3/ffffff?text=Acerto" />
 
     <!-- Google Fonts -->
@@ -477,10 +477,13 @@
                     
                     const authenticate = async () => {
                         try {
-                           await firebaseAuth.signInAnonymously();
-                        } catch (error) { 
-                            console.error("Firebase authentication failed:", error); 
-                            setError("Falha na autenticação. Verifique se o Login Anónimo e o domínio do GitHub Pages estão autorizados no Firebase.");
+                            // opcional: persistência explícita
+                            await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+                            await firebaseAuth.signInAnonymously();
+                            console.log("Auth OK");
+                        } catch (err) {
+                            console.error("Auth error:", err);
+                            setError(`Erro [${err.code}] ${err.message}`);
                         }
                     };
                     authenticate();
