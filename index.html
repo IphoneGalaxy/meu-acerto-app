@@ -39,7 +39,7 @@
     <script type="module">
         // Firebase SDK imports
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         const { useState, useEffect, useMemo } = React;
@@ -119,7 +119,7 @@
             }, [expensesColRef, plansColRef]);
 
             useEffect(() => {
-                if (installmentPlans.length === 0) return;
+                if (!db) return; // Don't run if db is not ready
 
                 const generateMissingInstallments = async () => {
                     const today = new Date();
@@ -166,7 +166,7 @@
                     }
                 };
                 generateMissingInstallments();
-            }, [installmentPlans, expenses, db, expensesColRef]);
+            }, [installmentPlans, expenses, db, expensesColRef]); // Rerun when data changes
 
             const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
             const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
@@ -268,7 +268,6 @@
                 const userVisibleExpenses = user === 'Guilherme'
                     ? expenses.filter(e => e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
                     : expenses.filter(e => e.paymentSource.includes('1009'));
-
                 let filtered = userVisibleExpenses;
                 switch(filter) {
                     case 'Cartão': filtered = userVisibleExpenses.filter(e => e.type === 'Cartão' && !e.parcela); break;
@@ -277,7 +276,6 @@
                     case 'Boleto': filtered = userVisibleExpenses.filter(e => e.type === 'Boleto'); break;
                     default: filtered = userVisibleExpenses;
                 }
-
                 return filtered.sort((a, b) => {
                     const aDate = new Date(a.date.split('/').reverse().join('-'));
                     const bDate = new Date(b.date.split('/').reverse().join('-'));
@@ -449,7 +447,7 @@
                         </div>
                         <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1ª parcela)'}</label><input type="date" value={date} onChange={e => setDate(e.target.value)} required className={inputClasses} /></div>
                         <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label><select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className={inputClasses}><option>Cartão Guilherme (final 2581)</option><option>Cartão Thais (final 1009)</option><option>Cartão Digital (final 7292)</option></select></div>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value={currentUser}>Apenas {currentUser}</option><option value={otherUser}>Apenas {otherUser}</option></select></div>
+                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value={currentUser}>Apenas {currentUser}</option><option value="Thais">Apenas Thais</option><option value="Guilherme">Apenas Guilherme</option></select></div>
                         <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label><select value={type} onChange={e => setType(e.target.value)} className={inputClasses}><option>Cartão</option><option>Pix</option><option>Boleto</option></select></div>
                         <div className="flex justify-end space-x-3 pt-4"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button><button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button></div>
                     </form>
@@ -462,34 +460,43 @@
             const [db, setDb] = useState(null);
             const [auth, setAuth] = useState(null);
             const [appId, setAppId] = useState(null);
+            const [error, setError] = useState(null);
 
             useEffect(() => {
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-                const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-                if (firebaseConfig && currentAppId) {
-                    try {
-                        const app = initializeApp(firebaseConfig);
-                        const firestoreDb = getFirestore(app);
-                        const firebaseAuth = getAuth(app);
-                        
-                        setDb(firestoreDb);
-                        setAuth(firebaseAuth);
-                        setAppId(currentAppId);
-                        
-                        const authenticate = async () => {
-                            try {
-                                if (initialAuthToken) {
-                                    await signInWithCustomToken(firebaseAuth, initialAuthToken);
-                                } else {
-                                    await signInAnonymously(firebaseAuth);
-                                }
-                            } catch (error) { console.error("Firebase authentication failed:", error); }
-                        };
-                        authenticate();
-                    } catch (error) { console.error("Failed to initialize Firebase:", error); }
+                // ===================================================================
+                // CONFIGURAÇÃO DO FIREBASE
+                // ===================================================================
+                 const firebaseConfig = {
+                    apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
+                    authDomain: "meu-acerto-app.firebaseapp.com",
+                    projectId: "meu-acerto-app",
+                    storageBucket: "meu-acerto-app.appspot.com",
+                    messagingSenderId: "326844075367",
+                    appId: "1:326844075367:web:0315e86713b1e0071f33c2"
+                };
+                // ===================================================================
+                
+                if (!firebaseConfig.apiKey) {
+                    setError("Configuração do Firebase não encontrada. Por favor, edite o arquivo index.html e cole as credenciais do seu projeto.");
+                    return;
                 }
+
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    const firestoreDb = getFirestore(app);
+                    const firebaseAuth = getAuth(app);
+                    
+                    setDb(firestoreDb);
+                    setAuth(firebaseAuth);
+                    setAppId(firebaseConfig.projectId);
+                    
+                    const authenticate = async () => {
+                        try {
+                           await signInAnonymously(firebaseAuth);
+                        } catch (error) { console.error("Firebase authentication failed:", error); setError("Falha na autenticação com o Firebase.");}
+                    };
+                    authenticate();
+                } catch (error) { console.error("Failed to initialize Firebase:", error); setError("Falha ao inicializar o Firebase. Verifique suas credenciais."); }
             }, []);
 
             const handleSelectUser = (user) => {
@@ -500,6 +507,10 @@
                 setCurrentUser(null);
                 localStorage.removeItem('meuAcertoUser');
             };
+            
+            if (error) {
+                return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
+            }
 
             if (!db || !auth || !appId) {
                 return <div className="min-h-screen flex items-center justify-center text-slate-500">Conectando ao servidor...</div>;
