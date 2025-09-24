@@ -1,0 +1,23 @@
+{
+  "name": "Meu Acerto",
+  "short_name": "Acerto",
+  "description": "Um aplicativo para gerenciar e dividir despesas entre duas pessoas.",
+  "start_url": "/controle-gastos-app/",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#4338ca",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/4338ca/ffffff?text=Acerto",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://placehold.co/512x512/4338ca/ffffff?text=Acerto",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
