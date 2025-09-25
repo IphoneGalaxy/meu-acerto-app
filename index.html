@@ -1,596 +1,922 @@
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Meu Acerto</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meu Acerto</title>
 
-    <!-- Link para o Manifesto do PWA -->
-    <link rel="manifest" href="manifest.json">
+  <!-- Manifest PWA -->
+  <link rel="manifest" href="manifest.json">
 
-    <!-- Tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- React -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- React 18 -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-    <!-- Babel (para JSX no browser) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Babel (JSX no browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- SheetJS -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- SheetJS -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <!-- Firebase compat (v10) -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
+  <!-- Firebase compat (v10) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
 
-    <!-- PWA/ícone -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
-    <meta name="theme-color" content="#4338ca" />
-    <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
+  <!-- PWA/ícone -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
+  <meta name="theme-color" content="#4338ca" />
+  <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
 
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        .modal-enter { animation: fadeIn 0.3s ease-out; }
-        .modal-leave { animation: fadeOut 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.95); } }
-    </style>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .modal-enter { animation: fadeIn 0.3s ease-out; }
+    .modal-leave { animation: fadeOut 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+    @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.95); } }
+  </style>
 </head>
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
-    <div id="root"></div>
+  <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
-        const { createRoot } = ReactDOM;
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+    const { createRoot } = ReactDOM;
 
-        // --- Funções Auxiliares ---
-        const parseBRFloat = (str) => {
-            if (typeof str !== 'string') return typeof str === 'number' ? str : 0;
-            const sanitized = str.replace(/\./g, '').replace(',', '.');
-            return parseFloat(sanitized) || 0;
-        };
+    // ---------- Auxiliares ----------
+    const parseBRFloat = (str) => {
+      if (typeof str !== 'string') return typeof str === 'number' ? str : 0;
+      const sanitized = str.replace(/\./g, '').replace(',', '.');
+      return parseFloat(sanitized) || 0;
+    };
+    const formatBRL = (value) =>
+      new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
-        const formatBRL = (value) => {
-            return new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'BRL' }).format(value || 0);
-        };
+    // ---------- Componentes ----------
+    const Modal = ({ isOpen, onClose, children }) => {
+      if (!isOpen) return null;
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md m-4" onClick={(e) => e.stopPropagation()}>
+            {children}
+          </div>
+        </div>
+      );
+    };
 
-        // --- Componentes React ---
+    const UserSelectionScreen = ({ onSelectUser }) => {
+      const users = ['Guilherme', 'Thais'];
+      return (
+        <div className="min-h-screen flex flex-col justify-center items-center bg-slate-100 dark:bg-slate-900 p-4 w-full">
+          <h1 className="text-4xl font-bold text-slate-800 dark:text-white mb-2">Meu Acerto</h1>
+          <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
+          <div className="space-y-4 w-full max-w-xs flex flex-col items-center">
+            {users.map((user) => (
+              <button
+                key={user}
+                onClick={() => onSelectUser(user)}
+                className={`w-full text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 ${
+                  user === 'Thais' ? 'bg-pink-600 hover:bg-pink-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {user}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    };
 
-        const Modal = ({ isOpen, onClose, children }) => {
-            if (!isOpen) return null;
-            return (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose}>
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md m-4" onClick={(e) => e.stopPropagation()}>
-                        {children}
-                    </div>
-                </div>
-            );
-        };
+    const Dashboard = ({ user, onLogout, db }) => {
+      const [expenses, setExpenses] = useState([]);
+      const [installmentPlans, setInstallmentPlans] = useState([]);
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [isImportModalOpen, setImportModalOpen] = useState(false);
+      const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+      const [deletingExpenseId, setDeletingExpenseId] = useState(null);
+      const [editingExpense, setEditingExpense] = useState(null);
+      const [importedExpenses, setImportedExpenses] = useState([]);
+      const [filter, setFilter] = useState('Todos');
+      const fileInputRef = useRef(null);
 
-        const UserSelectionScreen = ({ onSelectUser }) => {
-            const users = ['Guilherme', 'Thais'];
-            return (
-                <div className="min-h-screen flex flex-col justify-center items-center bg-slate-100 dark:bg-slate-900 p-4 w-full">
-                    <h1 className="text-4xl font-bold text-slate-800 dark:text-white mb-2">Meu Acerto</h1>
-                    <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
-                    <div className="space-y-4 w-full max-w-xs flex flex-col items-center">
-                        {users.map(user => (
-                            <button 
-                                key={user} 
-                                onClick={() => onSelectUser(user)} 
-                                className={`w-full text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 ${
-                                    user === 'Thais' ? 'bg-pink-600 hover:bg-pink-700' : 'bg-indigo-600 hover:bg-indigo-700'
-                                }`}
-                            >
-                                {user}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            );
-        };
-        
-        const Dashboard = ({ user, onLogout, db }) => {
-            const [expenses, setExpenses] = useState([]);
-            const [installmentPlans, setInstallmentPlans] = useState([]);
-            const [isModalOpen, setIsModalOpen] = useState(false);
-            const [isImportModalOpen, setImportModalOpen] = useState(false);
-            const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-            const [deletingExpenseId, setDeletingExpenseId] = useState(null);
-            const [editingExpense, setEditingExpense] = useState(null);
-            const [importedExpenses, setImportedExpenses] = useState([]);
-            const [filter, setFilter] = useState('Todos');
-            
-            const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
-            
-            const themes = {
-                Guilherme: { text: 'text-indigo-600', darkText: 'dark:text-indigo-400', bg: 'bg-indigo-600', hoverBg: 'hover:bg-indigo-700', ring: 'focus:ring-indigo-500', border: 'focus:border-indigo-500', borderClass: 'border-indigo-500' },
-                Thais: { text: 'text-pink-600', darkText: 'dark:text-pink-400', bg: 'bg-pink-600', hoverBg: 'hover:bg-pink-700', ring: 'focus:ring-pink-500', border: 'focus:border-pink-500', borderClass: 'border-pink-500' }
-            };
-            const theme = themes[user] || themes['Guilherme'];
+      const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
+      const themes = {
+        Guilherme: { text: 'text-indigo-600', darkText: 'dark:text-indigo-400', bg: 'bg-indigo-600', hoverBg: 'hover:bg-indigo-700', ring: 'focus:ring-indigo-500', border: 'focus:border-indigo-500', borderClass: 'border-indigo-500' },
+        Thais: { text: 'text-pink-600', darkText: 'dark:text-pink-400', bg: 'bg-pink-600', hoverBg: 'hover:bg-pink-700', ring: 'focus:ring-pink-500', border: 'focus:border-pink-500', borderClass: 'border-pink-500' }
+      };
+      const theme = themes[user] || themes.Guilherme;
 
-            const expensesColRef = useMemo(() => db.collection('expenses'), [db]);
-            const plansColRef = useMemo(() => db.collection('installmentPlans'), [db]);
+      const expensesColRef = useMemo(() => db.collection('expenses'), [db]);
+      const plansColRef = useMemo(() => db.collection('installmentPlans'), [db]);
 
-            useEffect(() => {
-                if (!db) return;
-                const unsubscribeExpenses = expensesColRef.onSnapshot(snapshot => setExpenses(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
-                const unsubscribePlans = plansColRef.onSnapshot(snapshot => setInstallmentPlans(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
-                return () => { unsubscribeExpenses(); unsubscribePlans(); };
-            }, [db, expensesColRef, plansColRef]);
+      useEffect(() => {
+        if (!db) return;
+        const unsubscribeExpenses = expensesColRef.onSnapshot((s) =>
+          setExpenses(s.docs.map((doc) => ({ ...doc.data(), id: doc.id })))
+        );
+        const unsubscribePlans = plansColRef.onSnapshot((s) =>
+          setInstallmentPlans(s.docs.map((doc) => ({ ...doc.data(), id: doc.id })))
+        );
+        return () => { unsubscribeExpenses(); unsubscribePlans(); };
+      }, [db, expensesColRef, plansColRef]);
 
-             useEffect(() => {
-                if (!db || installmentPlans.length === 0) return; 
+      // Geração de parcelas que faltam até hoje
+      useEffect(() => {
+        if (!db || installmentPlans.length === 0) return;
 
-                const generateMissingInstallments = async () => {
-                    const today = new Date();
-                    const batch = db.batch();
-                    let batchHasWrites = false;
+        const generateMissingInstallments = async () => {
+          const today = new Date();
+          const batch = db.batch();
+          let batchHasWrites = false;
 
-                    for (const plan of installmentPlans) {
-                        const [day, month, year] = plan.startDate.split('/');
-                        const startDate = new Date(year, month - 1, day);
-                        
-                        for (let i = 0; i < plan.numberOfInstallments; i++) {
-                            const installmentDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
-                            
-                            if (installmentDate <= today) {
-                                const installmentPlanId = plan.id;
-                                const installmentNumber = i + 1;
-                                
-                                const alreadyExists = expenses.some(exp => 
-                                    exp.installmentPlanId === installmentPlanId &&
-                                    exp.parcela === `${installmentNumber}/${plan.numberOfInstallments}`
-                                );
+          for (const plan of installmentPlans) {
+            const [day, month, year] = plan.startDate.split('/');
+            const startDate = new Date(year, month - 1, day);
 
-                                if (!alreadyExists) {
-                                    const newExpenseData = {
-                                        installmentPlanId, description: plan.description,
-                                        amount: plan.totalAmount / plan.numberOfInstallments,
-                                        date: installmentDate.toLocaleDateString('pt-PT'),
-                                        parcela: `${installmentNumber}/${plan.numberOfInstallments}`,
-                                        split: plan.split, type: plan.type, paymentSource: plan.paymentSource, paidBy: plan.paidBy
-                                    };
-                                    const newDocRef = expensesColRef.doc();
-                                    batch.set(newDocRef, newExpenseData);
-                                    batchHasWrites = true;
-                                }
-                            }
-                        }
-                    }
+            for (let i = 0; i < plan.numberOfInstallments; i++) {
+              const installmentDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
 
-                    if (batchHasWrites) {
-                        try { await batch.commit(); }
-                        catch (error) { console.error("Error generating installments: ", error); }
-                    }
-                };
-                generateMissingInstallments();
-            }, [installmentPlans, expenses, db, expensesColRef]); 
+              if (installmentDate <= today) {
+                const installmentPlanId = plan.id;
+                const installmentNumber = i + 1;
 
-            const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
-            const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
-            
-            const addSingleExpense = async (expense) => {
-                try { await expensesColRef.add(expense); }
-                catch (error) { console.error("Error adding document: ", error); }
-            };
-
-            const addInstallmentPlan = async (plan) => {
-                try {
-                    const planDocRef = await plansColRef.add(plan);
-                    const firstInstallment = {
-                        installmentPlanId: planDocRef.id, description: plan.description,
-                        amount: plan.totalAmount / plan.numberOfInstallments,
-                        date: plan.startDate, parcela: `1/${plan.numberOfInstallments}`,
-                        split: plan.split, type: plan.type, paymentSource: plan.paymentSource, paidBy: plan.paidBy
-                    };
-                    await expensesColRef.add(firstInstallment);
-                } catch (error) { console.error("Error adding plan: ", error); }
-            };
-
-            const updateExpense = async (updatedExpense) => {
-                const { id, ...dataToUpdate } = updatedExpense;
-                try { await expensesColRef.doc(id).update(dataToUpdate); }
-                catch (error) { console.error("Error updating document: ", error); }
-            };
-            
-            const confirmAndDeleteExpense = async () => {
-                if (!deletingExpenseId) return;
-                try {
-                    await expensesColRef.doc(deletingExpenseId).delete();
-                } catch (error) {
-                    console.error("Error deleting document: ", error);
-                }
-                setDeletingExpenseId(null);
-            };
-
-            const confirmAndClearAll = async () => {
-                try {
-                    const expensesSnapshot = await expensesColRef.get();
-                    const plansSnapshot = await plansColRef.get();
-                    const batch = db.batch();
-                    expensesSnapshot.forEach(doc => batch.delete(doc.ref));
-                    plansSnapshot.forEach(doc => batch.delete(doc.ref));
-                    await batch.commit();
-                } catch (error) {
-                    console.error("Erro ao limpar os dados:", error);
-                }
-                setIsClearModalOpen(false);
-            };
-
-            const handleFileUpload = (event) => {
-                 const file = event.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    let dataArray = [];
-                    if (file.name.endsWith('.xlsx')) {
-                        const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-                        dataArray = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, range: 2 });
-                    } else {
-                        dataArray = e.target.result.split(/\r?\n/).slice(2).map(line => line.split(','));
-                    }
-                    const allNewExpenses = dataArray.map((row) => {
-                        if (!row || row.length < 9 || typeof row[4] !== 'string' || row[4].toLowerCase().includes('inclusao de pagamento')) return null;
-                        const cardSuffix = row[2] ? String(row[2]).trim() : '';
-                        let owner, source;
-                        if (cardSuffix.endsWith('2581')) { owner = 'Guilherme'; source = 'Cartão Guilherme (final 2581)'; }
-                        else if (cardSuffix.endsWith('1009')) { owner = 'Thais'; source = 'Cartão Thais (final 1009)'; }
-                        else { owner = 'Digital'; source = 'Cartão Digital (final 7292)'; }
-                        const amount = typeof row[8] === 'number' ? row[8] : parseBRFloat(String(row[8] || 0));
-                        if (isNaN(amount) || amount === 0) return null;
-                        let description = row[4] || 'Sem descrição';
-                        if (amount < 0) description = `Estorno: ${description}`;
-                        const parcelaInfo = (row[5] && row[5] !== 'Única') ? String(row[5]) : null;
-                        return { description, amount, date: row[0] || new Date().toLocaleDateString('pt-PT'), split: 'Dividido', paidBy: owner, paymentSource: source, type: 'Cartão', parcela: parcelaInfo };
-                    }).filter(Boolean);
-                    setImportedExpenses(allNewExpenses);
-                    setImportModalOpen(true);
-                };
-                if (file.name.endsWith('.xlsx')) reader.readAsArrayBuffer(file);
-                else reader.readAsText(file, 'ISO-8859-1');
-                event.target.value = null;
-            };
-
-            const confirmImport = async () => {
-                const uniqueImportedExpenses = importedExpenses.filter(imported => 
-                    !expenses.some(existing => 
-                        existing.description === imported.description && Math.abs(existing.amount - imported.amount) < 0.01 &&
-                        existing.date === imported.date && existing.parcela === imported.parcela
-                    )
+                const alreadyExists = expenses.some(
+                  (exp) => exp.installmentPlanId === installmentPlanId && exp.parcela === `${installmentNumber}/${plan.numberOfInstallments}`
                 );
-                try {
-                    const batch = db.batch();
-                    uniqueImportedExpenses.forEach(expense => {
-                        const newDocRef = expensesColRef.doc();
-                        batch.set(newDocRef, expense);
-                    });
-                    await batch.commit();
-                } catch (error) { console.error("Error importing documents: ", error); }
-                setImportedExpenses([]);
-                setImportModalOpen(false);
-            };
-            
-            const filteredAndSortedExpenses = useMemo(() => {
-                const userVisibleExpenses = user === 'Guilherme'
-                    ? expenses.filter(e => e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
-                    : expenses.filter(e => e.paymentSource.includes('1009'));
-                let filtered = userVisibleExpenses;
-                switch(filter) {
-                    case 'Cartão': filtered = userVisibleExpenses.filter(e => e.type === 'Cartão' && !e.parcela); break;
-                    case 'Parcelados': filtered = userVisibleExpenses.filter(e => !!e.parcela); break;
-                    case 'Pix': filtered = userVisibleExpenses.filter(e => e.type === 'Pix'); break;
-                    case 'Boleto': filtered = userVisibleExpenses.filter(e => e.type === 'Boleto'); break;
-                    default: filtered = userVisibleExpenses;
+
+                if (!alreadyExists) {
+                  const newExpenseData = {
+                    installmentPlanId,
+                    description: plan.description,
+                    amount: plan.totalAmount / plan.numberOfInstallments,
+                    date: installmentDate.toLocaleDateString('pt-PT'),
+                    parcela: `${installmentNumber}/${plan.numberOfInstallments}`,
+                    split: plan.split,
+                    type: plan.type,
+                    paymentSource: plan.paymentSource,
+                    paidBy: plan.paidBy
+                  };
+                  const newDocRef = expensesColRef.doc();
+                  batch.set(newDocRef, newExpenseData);
+                  batchHasWrites = true;
                 }
-                return filtered.sort((a, b) => {
-                    const aDate = new Date(a.date.split('/').reverse().join('-'));
-                    const bDate = new Date(b.date.split('/').reverse().join('-'));
-                    if (filter === 'Todos') {
-                        const aIsParcela = !!a.parcela;
-                        const bIsParcela = !!b.parcela;
-                        if (aIsParcela !== bIsParcela) return aIsParcela ? 1 : -1;
-                    }
-                    return bDate - aDate;
-                });
-            }, [expenses, filter, user]);
+              }
+            }
+          }
 
-            const totals = useMemo(() => {
-                let userTotal = 0, otherUserTotal = 0;
-                expenses.forEach(e => {
-                    if (e.split === 'Dividido') { userTotal += e.amount / 2; otherUserTotal += e.amount / 2; }
-                    else if (e.split === user) { userTotal += e.amount; }
-                    else if (e.split === otherUser) { otherUserTotal += e.amount; }
-                });
-                const userPaid = expenses.filter(e => e.paidBy === user).reduce((sum, e) => sum + e.amount, 0);
-                const otherUserPaid = expenses.filter(e => e.paidBy === otherUser).reduce((sum, e) => sum + e.amount, 0);
-                const balance = otherUserTotal - otherUserPaid;
-                const guilhermeCardTotal = expenses.filter(e => e.paymentSource.includes('2581')).reduce((sum, e) => sum + e.amount, 0);
-                const thaisCardTotal = expenses.filter(e => e.paymentSource.includes('1009')).reduce((sum, e) => sum + e.amount, 0);
-                const digitalCardTotal = expenses.filter(e => e.paymentSource.includes('7292')).reduce((sum, e) => sum + e.amount, 0);
-                const grandTotal = guilhermeCardTotal + thaisCardTotal + digitalCardTotal;
-                const limiteLiberadoProximoMes = expenses.filter(e => {
-                    const isUserCard = user === 'Guilherme' ? (e.paymentSource.includes('2581') || e.paymentSource.includes('7292')) : e.paymentSource.includes('1009');
-                    if (!isUserCard || !e.parcela || typeof e.parcela !== 'string') return false;
-                    const [current, total] = e.parcela.split('/').map(Number);
-                    return current === total;
-                }).reduce((sum, e) => sum + e.amount, 0);
-                return { userTotal, otherUserTotal, userPaid, otherUserPaid, balance, guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
-            }, [expenses, user, otherUser]);
+          if (batchHasWrites) {
+            try { await batch.commit(); } catch (error) { console.error('Error generating installments: ', error); }
+          }
+        };
+        generateMissingInstallments();
+      }, [installmentPlans, expenses, db, expensesColRef]);
 
+      const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
+      const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
 
-            const FilterButton = ({ label }) => {
-                const isActive = filter === label;
-                return (<button onClick={() => setFilter(label)} className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${isActive ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}>{label}</button>);
-            };
+      const addSingleExpense = async (expense) => {
+        try { await expensesColRef.add(expense); } catch (error) { console.error('Error adding document: ', error); }
+      };
 
-            return (
-                <div className="max-w-4xl mx-auto p-2 sm:p-4 pb-24">
-                    <header className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-6 gap-4">
-                        <div>
-                            <h1 className="text-2xl font-bold">Olá, {user}</h1>
-                            <p className="text-slate-500 dark:text-slate-400">Resumo das suas despesas.</p>
-                        </div>
-                        <div className="flex items-start justify-between w-full sm:w-auto sm:space-x-6">
-                            <div className="text-left sm:text-right text-sm">
-                                <div>
-                                    <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Faturas</h3>
-                                    <div className="space-y-1 text-slate-500 dark:text-slate-400">
-                                        <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.guilhermeCardTotal)}</span></p>
-                                        <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.thaisCardTotal)}</span></p>
-                                        <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.digitalCardTotal)}</span></p>
-                                        <hr className="my-2 border-slate-200 dark:border-slate-700" />
-                                        <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(totals.grandTotal)}</span></p>
-                                    </div>
-                                </div>
-                                {totals.limiteLiberadoProximoMes > 0 && (<div className="mt-4"><h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Próximo Mês</h3><p className="text-slate-500 dark:text-slate-400">Limite liberado: <span className="font-bold text-emerald-500 dark:text-emerald-400 ml-1">{formatBRL(totals.limiteLiberadoProximoMes)}</span></p></div>)}
-                            </div>
-                            <button onClick={onLogout} className={`text-slate-500 hover:${theme.text} dark:hover:${theme.darkText} transition`}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
-                        </div>
-                    </header>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md"><h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Resultado Final</h3>{totals.balance >= 0 ? (<div><p className="text-sm">{otherUser} deve pagar-lhe</p><p className="text-2xl sm:text-3xl font-bold text-emerald-500">{formatBRL(totals.balance)}</p></div>) : (<div><p className="text-sm">Deve pagar a {otherUser}</p><p className="text-2xl sm:text-3xl font-bold text-red-500">{formatBRL(Math.abs(totals.balance))}</p></div>)}</div>
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md"><h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Detalhes</h3><div className="text-sm space-y-2"><p>A sua parte: <span className="font-semibold">{formatBRL(totals.userTotal)}</span></p><p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserTotal)}</span></p><p>Total pago por si: <span className="font-semibold">{formatBRL(totals.userPaid)}</span></p><p>Total pago por {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserPaid)}</span></p></div></div>
-                    </div>
-                    <div className="flex space-x-2 mb-6">
-                       <button onClick={openAddModal} className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Adicionar</button>
-                       <label htmlFor="file-upload" className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar</label>
-                       <button onClick={() => setIsClearModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center">
-                           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                           Limpar
-                        </button>
-                    </div>
-                    <div className="bg-white dark:bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-md">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 px-2">
-                           <h2 className="text-xl font-bold mb-3 sm:mb-0">Lançamentos</h2>
-                           <div className="flex flex-wrap gap-1 sm:gap-2 justify-start">
-                               <FilterButton label="Todos" /><FilterButton label="Cartão" /><FilterButton label="Parcelados" /><FilterButton label="Pix" /><FilterButton label="Boleto" />
-                           </div>
-                        </div>
-                        <div className="space-y-2">
-                           {filteredAndSortedExpenses.length > 0 ? filteredAndSortedExpenses.map(expense => {
-                                const borderClass = expense.split === 'Guilherme' ? themes.Guilherme.borderClass : expense.split === 'Thais' ? themes.Thais.borderClass : 'border-transparent';
-                                let isLastInstallment = false;
-                                if (expense.parcela) { const [current, total] = expense.parcela.split('/').map(Number); if (current === total) isLastInstallment = true; }
-                                return (
-                                   <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
-                                       <div className="flex-grow">
-                                           <p className="font-semibold flex items-center text-sm sm:text-base">
-                                                {expense.description}
-                                                {expense.parcela && (<span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${isLastInstallment ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>{expense.parcela}</span>)}
-                                            </p>
-                                           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}</p>
-                                       </div>
-                                       <div className="text-right flex-shrink-0 flex items-center gap-2">
-                                           <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
-                                            <div className="flex items-center space-x-1">
-                                                <button onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-                                                <button onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
-                                           </div>
-                                       </div>
-                                   </div>
-                                )}) : (<p className="text-center text-slate-500 dark:text-slate-400 py-8">Nenhum lançamento para este filtro.</p>)}
-                        </div>
-                    </div>
-                    <ExpenseForm 
-                        isOpen={isModalOpen} 
-                        onClose={() => setIsModalOpen(false)} 
-                        expense={editingExpense} 
-                        currentUser={user} 
-                        theme={theme} 
-                        addSingleExpense={addSingleExpense}
-                        addInstallmentPlan={addInstallmentPlan}
-                        updateExpense={updateExpense}
-                    />
-                    <Modal isOpen={isImportModalOpen} onClose={() => setImportModalOpen(false)}>
-                        <div className="p-6">
-                            <h2 className="text-xl font-bold mb-4">Confirmar Importação</h2>
-                            <p className="mb-6">Está prestes a adicionar {importedExpenses.filter(i => !expenses.some(e => e.description === i.description && Math.abs(e.amount - i.amount) < 0.01 && e.date === i.date && e.parcela === i.parcela)).length} novos lançamentos. Deseja continuar?</p>
-                            <div className="flex justify-end space-x-3">
-                                <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
-                                <button onClick={confirmImport} className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`} disabled={importedExpenses.length === 0}>Confirmar</button>
-                            </div>
-                        </div>
-                    </Modal>
-                    <Modal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)}>
-                        <div className="p-6">
-                            <div className="flex items-center justify-center mb-4">
-                                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-600 dark:text-red-400"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                                </div>
-                            </div>
-                            <h2 className="text-xl font-bold mb-2 text-center">Apagar Todos os Dados?</h2>
-                            <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Esta ação é permanente. Todos os lançamentos e planos de parcelamento serão excluídos.</p>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setIsClearModalOpen(false)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
-                                <button onClick={confirmAndClearAll} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Confirmar Exclusão</button>
-                            </div>
-                        </div>
-                    </Modal>
-                    <Modal isOpen={!!deletingExpenseId} onClose={() => setDeletingExpenseId(null)}>
-                        <div className="p-6">
-                            <h2 className="text-xl font-bold mb-2 text-center">Excluir Lançamento?</h2>
-                            <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Tem a certeza que deseja excluir este lançamento? Esta ação não pode ser desfeita.</p>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setDeletingExpenseId(null)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
-                                <button onClick={confirmAndDeleteExpense} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Sim, Excluir</button>
-                            </div>
-                        </div>
-                    </Modal>
+      const addInstallmentPlan = async (plan) => {
+        try {
+          const planDocRef = await plansColRef.add(plan);
+          const firstInstallment = {
+            installmentPlanId: planDocRef.id,
+            description: plan.description,
+            amount: plan.totalAmount / plan.numberOfInstallments,
+            date: plan.startDate,
+            parcela: `1/${plan.numberOfInstallments}`,
+            split: plan.split,
+            type: plan.type,
+            paymentSource: plan.paymentSource,
+            paidBy: plan.paidBy
+          };
+          await expensesColRef.add(firstInstallment);
+        } catch (error) { console.error('Error adding plan: ', error); }
+      };
+
+      const updateExpense = async (updatedExpense) => {
+        const { id, ...dataToUpdate } = updatedExpense;
+        try { await expensesColRef.doc(id).update(dataToUpdate); } catch (error) { console.error('Error updating document: ', error); }
+      };
+
+      const confirmAndDeleteExpense = async () => {
+        if (!deletingExpenseId) return;
+        try { await expensesColRef.doc(deletingExpenseId).delete(); } catch (error) { console.error('Error deleting document: ', error); }
+        setDeletingExpenseId(null);
+      };
+
+      const confirmAndClearAll = async () => {
+        try {
+          const expensesSnapshot = await expensesColRef.get();
+          const plansSnapshot = await plansColRef.get();
+          const batch = db.batch();
+          expensesSnapshot.forEach((doc) => batch.delete(doc.ref));
+          plansSnapshot.forEach((doc) => batch.delete(doc.ref));
+          await batch.commit();
+        } catch (error) {
+          console.error('Erro ao limpar os dados:', error);
+        }
+        setIsClearModalOpen(false);
+      };
+
+      // ----------- IMPORTAÇÃO (.xls/.xlsx/.csv) COM SENHA 130843 -----------
+      const handleFileUpload = (event) => {
+        try {
+          const file = event.target.files?.[0];
+          if (!file) return;
+
+          const PASSWORD = '130843';
+          const reader = new FileReader();
+
+          reader.onload = (e) => {
+            try {
+              const buf = new Uint8Array(e.target.result);
+              const ext = file.name.toLowerCase().split('.').pop();
+              let rows = [];
+
+              if (ext === 'xls' || ext === 'xlsx') {
+                const wb = XLSX.read(buf, { type: 'array', password: PASSWORD });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+              } else if (ext === 'csv') {
+                const text = new TextDecoder('latin1').decode(buf);
+                rows = text.split(/\r?\n/).map((line) => line.split(','));
+              } else {
+                alert('Formato não suportado. Use .xls, .xlsx ou .csv.');
+                return;
+              }
+
+              // Detecta a linha do cabeçalho pela presença de “Data de compra”
+              const headerIdx = rows.findIndex(
+                (r) => Array.isArray(r) && r.some((c) => /data.*compra/i.test(String(c || '')))
+              );
+              if (headerIdx < 0) {
+                alert('Cabeçalho "Data de compra" não encontrado.');
+                return;
+              }
+
+              const header = rows[headerIdx].map((h) => String(h || '').trim());
+              const col = (regex, fallback = -1) => {
+                const i = header.findIndex((h) => regex.test(h));
+                return i >= 0 ? i : fallback;
+              };
+
+              // Colunas conforme seu layout (print que você enviou)
+              const COL_DATA   = col(/data.*compra/i, 0);
+              const COL_FINAL  = col(/final.*cart/i, 2);
+              const COL_DESC   = col(/descri/i, 4);
+              const COL_PARC   = col(/parcel/i, 5);
+              const COL_VALORR = col(/valor.*\(.*r\$/i, 8); // "Valor (em R$)"
+
+              if ([COL_DATA, COL_FINAL, COL_DESC, COL_PARC, COL_VALORR].some((i) => i < 0)) {
+                alert('Não consegui mapear todas as colunas. Confira os títulos da planilha.');
+                return;
+              }
+
+              const dataRows = rows.slice(headerIdx + 1);
+
+              const parseAmountBRL = (v) => {
+                const s = String(v || '')
+                  .replace(/\s/g, '')
+                  .replace(/R\$\s?/i, '')
+                  .replace(/\./g, '')
+                  .replace(',', '.');
+                const n = parseFloat(s);
+                return Number.isFinite(n) ? n : 0;
+              };
+
+              const isDate = (v) => /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(String(v || '').trim());
+
+              const allNewExpenses = dataRows
+                .map((row) => {
+                  if (!row || row.length === 0) return null;
+
+                  const rawDate  = row[COL_DATA];
+                  const rawFinal = row[COL_FINAL];
+                  const rawDesc  = row[COL_DESC];
+                  const rawParc  = row[COL_PARC];
+                  const rawValor = row[COL_VALORR];
+
+                  if (!isDate(rawDate) || !rawDesc) return null;
+
+                  // Ignora “Inclusao de pagamento”
+                  if (String(rawDesc).toLowerCase().includes('inclusao de pagamento')) return null;
+
+                  // Dono/fonte pelo final do cartão
+                  const final = String(rawFinal || '').trim();
+                  let paidBy = 'Digital';
+                  let paymentSource = 'Cartão Digital (final 7292)';
+                  if (final.endsWith('2581')) {
+                    paidBy = 'Guilherme';
+                    paymentSource = 'Cartão Guilherme (final 2581)';
+                  } else if (final.endsWith('1009')) {
+                    paidBy = 'Thais';
+                    paymentSource = 'Cartão Thais (final 1009)';
+                  }
+
+                  const amount = parseAmountBRL(rawValor);
+                  if (!amount) return null;
+
+                  let description = String(rawDesc);
+                  if (amount < 0) description = `Estorno: ${description}`;
+
+                  const parcela =
+                    rawParc && String(rawParc).trim() !== '' && String(rawParc) !== 'Única'
+                      ? String(rawParc)
+                      : null;
+
+                  const date = String(rawDate); // já em dd/mm/aaaa
+
+                  return {
+                    description,
+                    amount,
+                    date,
+                    split: 'Dividido',
+                    paidBy,
+                    paymentSource,
+                    type: 'Cartão',
+                    parcela
+                  };
+                })
+                .filter(Boolean);
+
+              setImportedExpenses(allNewExpenses);
+              setImportModalOpen(true);
+            } catch (err) {
+              console.error('Erro ao processar a planilha:', err);
+              alert('Não consegui ler a planilha. Confirme a senha e o layout.');
+            }
+          };
+
+          // Lê sempre como ArrayBuffer (funciona para xls/xlsx/csv)
+          reader.readAsArrayBuffer(file);
+
+          // permite reimportar o mesmo arquivo
+          event.target.value = null;
+        } catch (uploadError) {
+          console.error('Erro no upload do ficheiro:', uploadError);
+        }
+      };
+      // --------------------------------------------------------------------
+
+      const confirmImport = async () => {
+        const uniqueImportedExpenses = importedExpenses.filter(
+          (imported) =>
+            !expenses.some(
+              (existing) =>
+                existing.description === imported.description &&
+                Math.abs(existing.amount - imported.amount) < 0.01 &&
+                existing.date === imported.date &&
+                existing.parcela === imported.parcela
+            )
+        );
+        try {
+          const batch = db.batch();
+          uniqueImportedExpenses.forEach((expense) => {
+            const newDocRef = expensesColRef.doc();
+            batch.set(newDocRef, expense);
+          });
+          await batch.commit();
+        } catch (error) { console.error('Error importing documents: ', error); }
+        setImportedExpenses([]);
+        setImportModalOpen(false);
+      };
+
+      const filteredAndSortedExpenses = useMemo(() => {
+        const userVisibleExpenses =
+          user === 'Guilherme'
+            ? expenses.filter((e) => e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
+            : expenses.filter((e) => e.paymentSource.includes('1009'));
+        let filtered = userVisibleExpenses;
+        switch (filter) {
+          case 'Cartão': filtered = userVisibleExpenses.filter((e) => e.type === 'Cartão' && !e.parcela); break;
+          case 'Parcelados': filtered = userVisibleExpenses.filter((e) => !!e.parcela); break;
+          case 'Pix': filtered = userVisibleExpenses.filter((e) => e.type === 'Pix'); break;
+          case 'Boleto': filtered = userVisibleExpenses.filter((e) => e.type === 'Boleto'); break;
+          default: filtered = userVisibleExpenses;
+        }
+        return filtered.sort((a, b) => {
+          const aDate = new Date(a.date.split('/').reverse().join('-'));
+          const bDate = new Date(b.date.split('/').reverse().join('-'));
+          if (filter === 'Todos') {
+            const aIsParcela = !!a.parcela;
+            const bIsParcela = !!b.parcela;
+            if (aIsParcela !== bIsParcela) return aIsParcela ? 1 : -1;
+          }
+          return bDate - aDate;
+        });
+      }, [expenses, filter, user]);
+
+      const totals = useMemo(() => {
+        let userTotal = 0, otherUserTotal = 0;
+        expenses.forEach((e) => {
+          if (e.split === 'Dividido') { userTotal += e.amount / 2; otherUserTotal += e.amount / 2; }
+          else if (e.split === user) { userTotal += e.amount; }
+          else if (e.split === otherUser) { otherUserTotal += e.amount; }
+        });
+        const userPaid = expenses.filter((e) => e.paidBy === user).reduce((sum, e) => sum + e.amount, 0);
+        const otherUserPaid = expenses.filter((e) => e.paidBy === otherUser).reduce((sum, e) => sum + e.amount, 0);
+        const balance = otherUserTotal - otherUserPaid;
+        const guilhermeCardTotal = expenses.filter((e) => e.paymentSource.includes('2581')).reduce((s, e) => s + e.amount, 0);
+        const thaisCardTotal = expenses.filter((e) => e.paymentSource.includes('1009')).reduce((s, e) => s + e.amount, 0);
+        const digitalCardTotal = expenses.filter((e) => e.paymentSource.includes('7292')).reduce((s, e) => s + e.amount, 0);
+        const grandTotal = guilhermeCardTotal + thaisCardTotal + digitalCardTotal;
+        const limiteLiberadoProximoMes = expenses
+          .filter((e) => {
+            const isUserCard = user === 'Guilherme'
+              ? (e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
+              : e.paymentSource.includes('1009');
+            if (!isUserCard || !e.parcela || typeof e.parcela !== 'string') return false;
+            const [current, total] = e.parcela.split('/').map(Number);
+            return current === total;
+          })
+          .reduce((sum, e) => sum + e.amount, 0);
+        return { userTotal, otherUserTotal, userPaid, otherUserPaid, balance, guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
+      }, [expenses, user, otherUser]);
+
+      const FilterButton = ({ label }) => {
+        const isActive = filter === label;
+        return (
+          <button
+            onClick={() => setFilter(label)}
+            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${
+              isActive ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+            }`}
+          >
+            {label}
+          </button>
+        );
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto p-2 sm:p-4 pb-24">
+          <header className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-6 gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">Olá, {user}</h1>
+              <p className="text-slate-500 dark:text-slate-400">Resumo das suas despesas.</p>
+            </div>
+            <div className="flex items-start justify-between w-full sm:w-auto sm:space-x-6">
+              <div className="text-left sm:text-right text-sm">
+                <div>
+                  <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Faturas</h3>
+                  <div className="space-y-1 text-slate-500 dark:text-slate-400">
+                    <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.guilhermeCardTotal)}</span></p>
+                    <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.thaisCardTotal)}</span></p>
+                    <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.digitalCardTotal)}</span></p>
+                    <hr className="my-2 border-slate-200 dark:border-slate-700" />
+                    <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(totals.grandTotal)}</span></p>
+                  </div>
                 </div>
-            );
-        };
-        
-        const ExpenseForm = ({ isOpen, onClose, expense, currentUser, theme, addSingleExpense, addInstallmentPlan, updateExpense }) => {
-            const [description, setDescription] = useState('');
-            const [amount, setAmount] = useState('');
-            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-            const [paymentSource, setPaymentSource] = useState('');
-            const [split, setSplit] = useState('Dividido');
-            const [type, setType] = useState('Cartão');
-            const [totalInstallments, setTotalInstallments] = useState('1');
-            const otherUser = currentUser === 'Guilherme' ? 'Thais' : 'Guilherme';
+                {totals.limiteLiberadoProximoMes > 0 && (
+                  <div className="mt-4">
+                    <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Próximo Mês</h3>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      Limite liberado:
+                      <span className="font-bold text-emerald-500 dark:text-emerald-400 ml-1">{formatBRL(totals.limiteLiberadoProximoMes)}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={onLogout}
+                className={`text-slate-500 hover:${theme.text} dark:hover:${theme.darkText} transition`}
+                title="Sair"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
+            </div>
+          </header>
 
-            useEffect(() => {
-                const defaultSource = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
-                if (expense) {
-                    setDescription(expense.description);
-                    setAmount(String(expense.amount).replace('.', ','));
-                    setDate(expense.date ? new Date(expense.date.split('/').reverse().join('-')).toISOString().split('T')[0] : '');
-                    setPaymentSource(expense.paymentSource || defaultSource);
-                    setSplit(expense.split);
-                    setType(expense.type || 'Cartão');
-                    setTotalInstallments(expense.parcela ? expense.parcela.split('/')[1] : '1');
-                } else {
-                    setDescription(''); setAmount(''); setDate(new Date().toISOString().split('T')[0]);
-                    setPaymentSource(defaultSource); setSplit('Dividido'); setType('Cartão'); setTotalInstallments('1');
-                }
-            }, [expense, isOpen, currentUser]);
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
+              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Resultado Final</h3>
+              {totals.balance >= 0 ? (
+                <div>
+                  <p className="text-sm">{otherUser} deve pagar-lhe</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500">{formatBRL(totals.balance)}</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm">Deve pagar a {otherUser}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-500">{formatBRL(Math.abs(totals.balance))}</p>
+                </div>
+              )}
+            </div>
 
-            const handleSubmit = (e) => {
-                e.preventDefault();
-                const paidBy = paymentSource.includes('Guilherme') ? 'Guilherme' : (paymentSource.includes('Thais') ? 'Thais' : 'Digital');
-                if (expense) {
-                    updateExpense({ ...expense, description, amount: parseBRFloat(amount), date: new Date(date).toLocaleDateString('pt-PT', {timeZone: 'UTC'}), split, type, paymentSource, paidBy });
-                } else {
-                    const numInstallments = parseInt(totalInstallments, 10) || 1;
-                    if (numInstallments > 1) {
-                        addInstallmentPlan({ description, totalAmount: parseBRFloat(amount), numberOfInstallments: numInstallments, startDate: new Date(date).toLocaleDateString('pt-PT', {timeZone: 'UTC'}), split, type, paymentSource, paidBy });
-                    } else {
-                        addSingleExpense({ description, amount: parseBRFloat(amount), date: new Date(date).toLocaleDateString('pt-PT', {timeZone: 'UTC'}), split, type, paymentSource, paidBy, parcela: null });
-                    }
-                }
-                onClose();
-            };
-            
-            const inputClasses = `mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md shadow-sm ${theme.ring} ${theme.border}`;
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
+              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Detalhes</h3>
+              <div className="text-sm space-y-2">
+                <p>A sua parte: <span className="font-semibold">{formatBRL(totals.userTotal)}</span></p>
+                <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserTotal)}</span></p>
+                <p>Total pago por si: <span className="font-semibold">{formatBRL(totals.userPaid)}</span></p>
+                <p>Total pago por {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserPaid)}</span></p>
+              </div>
+            </div>
+          </div>
 
-            return (
-                <Modal isOpen={isOpen} onClose={onClose}>
-                    <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                        <h2 className="text-xl font-bold mb-4">{expense ? 'Editar Lançamento' : 'Novo Lançamento'}</h2>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label><input type="text" value={description} onChange={e => setDescription(e.target.value)} required className={inputClasses} /></div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label><input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="123,45" required className={inputClasses} /></div>
-                            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label><input type="number" value={totalInstallments} onChange={e => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} /></div>
+          <div className="flex space-x-2 mb-6">
+            <button
+              onClick={openAddModal}
+              className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Adicionar
+            </button>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Importar
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".xls,.xlsx,.csv"
+              onChange={handleFileUpload}
+              multiple={false}
+            />
+
+            <button
+              onClick={() => setIsClearModalOpen(true)}
+              className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+              Limpar
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-md">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 px-2">
+              <h2 className="text-xl font-bold mb-3 sm:mb-0">Lançamentos</h2>
+              <div className="flex flex-wrap gap-1 sm:gap-2 justify-start">
+                <FilterButton label="Todos" />
+                <FilterButton label="Cartão" />
+                <FilterButton label="Parcelados" />
+                <FilterButton label="Pix" />
+                <FilterButton label="Boleto" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {filteredAndSortedExpenses.length > 0 ? (
+                filteredAndSortedExpenses.map((expense) => {
+                  const borderClass =
+                    expense.split === 'Guilherme'
+                      ? themes.Guilherme.borderClass
+                      : expense.split === 'Thais'
+                      ? themes.Thais.borderClass
+                      : 'border-transparent';
+                  let isLastInstallment = false;
+                  if (expense.parcela) {
+                    const [current, total] = expense.parcela.split('/').map(Number);
+                    if (current === total) isLastInstallment = true;
+                  }
+                  return (
+                    <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
+                      <div className="flex-grow">
+                        <p className="font-semibold flex items-center text-sm sm:text-base">
+                          {expense.description}
+                          {expense.parcela && (
+                            <span
+                              className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${
+                                isLastInstallment
+                                  ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              {expense.parcela}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                          {expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}
+                        </p>
+                      </div>
+
+                      <div className="text-right flex-shrink-0 flex items-center gap-2">
+                        <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>
+                          {formatBRL(expense.amount)}
+                        </p>
+                        <div className="flex items-center space-x-1">
+                          <button onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1" title="Editar">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                            </svg>
+                          </button>
+                          <button onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1" title="Excluir">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                            </svg>
+                          </button>
                         </div>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label><input type="date" value={date} onChange={e => setDate(e.target.value)} required className={inputClasses} /></div>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label><select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className={inputClasses}><option>Cartão Guilherme (final 2581)</option><option>Cartão Thais (final 1009)</option><option>Cartão Digital (final 7292)</option></select></div>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value={currentUser}>Apenas {currentUser}</option><option value="Thais">Apenas Thais</option><option value="Guilherme">Apenas Guilherme</option></select></div>
-                        <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label><select value={type} onChange={e => setType(e.target.value)} className={inputClasses}><option>Cartão</option><option>Pix</option><option>Boleto</option></select></div>
-                        <div className="flex justify-end space-x-3 pt-4"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button><button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button></div>
-                    </form>
-                </Modal>
-            );
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-center text-slate-500 dark:text-slate-400 py-8">Nenhum lançamento para este filtro.</p>
+              )}
+            </div>
+          </div>
+
+          <ExpenseForm
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            expense={editingExpense}
+            currentUser={user}
+            theme={theme}
+            addSingleExpense={addSingleExpense}
+            addInstallmentPlan={addInstallmentPlan}
+            updateExpense={updateExpense}
+          />
+
+          <Modal isOpen={isImportModalOpen} onClose={() => setImportModalOpen(false)}>
+            <div className="p-6">
+              <h2 className="text-xl font-bold mb-4">Confirmar Importação</h2>
+              <p className="mb-6">
+                Está prestes a adicionar {
+                  importedExpenses.filter(i =>
+                    !expenses.some(e =>
+                      e.description === i.description &&
+                      Math.abs(e.amount - i.amount) < 0.01 &&
+                      e.date === i.date &&
+                      e.parcela === i.parcela
+                    )
+                  ).length
+                } novos lançamentos. Deseja continuar?
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
+                <button onClick={confirmImport} className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`} disabled={importedExpenses.length === 0}>Confirmar</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)}>
+            <div className="p-6">
+              <div className="flex items-center justify-center mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                </div>
+              </div>
+              <h2 className="text-xl font-bold mb-2 text-center">Apagar Todos os Dados?</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Esta ação é permanente. Todos os lançamentos e planos de parcelamento serão excluídos.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setIsClearModalOpen(false)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
+                <button onClick={confirmAndClearAll} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Confirmar Exclusão</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal isOpen={!!deletingExpenseId} onClose={() => setDeletingExpenseId(null)}>
+            <div className="p-6">
+              <h2 className="text-xl font-bold mb-2 text-center">Excluir Lançamento?</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Tem a certeza que deseja excluir este lançamento? Esta ação não pode ser desfeita.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setDeletingExpenseId(null)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
+                <button onClick={confirmAndDeleteExpense} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Sim, Excluir</button>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      );
+    };
+
+    const ExpenseForm = ({ isOpen, onClose, expense, currentUser, theme, addSingleExpense, addInstallmentPlan, updateExpense }) => {
+      const [description, setDescription] = useState('');
+      const [amount, setAmount] = useState('');
+      const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+      const [paymentSource, setPaymentSource] = useState('');
+      const [split, setSplit] = useState('Dividido');
+      const [type, setType] = useState('Cartão');
+      const [totalInstallments, setTotalInstallments] = useState('1');
+
+      useEffect(() => {
+        const defaultSource = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
+        if (expense) {
+          setDescription(expense.description);
+          setAmount(String(expense.amount).replace('.', ','));
+          setDate(expense.date ? new Date(expense.date.split('/').reverse().join('-')).toISOString().split('T')[0] : '');
+          setPaymentSource(expense.paymentSource || defaultSource);
+          setSplit(expense.split);
+          setType(expense.type || 'Cartão');
+          setTotalInstallments(expense.parcela ? expense.parcela.split('/')[1] : '1');
+        } else {
+          setDescription('');
+          setAmount('');
+          setDate(new Date().toISOString().split('T')[0]);
+          setPaymentSource(defaultSource);
+          setSplit('Dividido');
+          setType('Cartão');
+          setTotalInstallments('1');
+        }
+      }, [expense, isOpen, currentUser]);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        const paidBy = paymentSource.includes('Guilherme') ? 'Guilherme' : (paymentSource.includes('Thais') ? 'Thais' : 'Digital');
+        if (expense) {
+          updateExpense({
+            ...expense,
+            description,
+            amount: parseBRFloat(amount),
+            date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
+            split,
+            type,
+            paymentSource,
+            paidBy
+          });
+        } else {
+          const numInstallments = parseInt(totalInstallments, 10) || 1;
+          if (numInstallments > 1) {
+            addInstallmentPlan({
+              description,
+              totalAmount: parseBRFloat(amount),
+              numberOfInstallments: numInstallments,
+              startDate: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
+              split,
+              type,
+              paymentSource,
+              paidBy
+            });
+          } else {
+            addSingleExpense({
+              description,
+              amount: parseBRFloat(amount),
+              date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
+              split,
+              type,
+              paymentSource,
+              paidBy,
+              parcela: null
+            });
+          }
+        }
+        onClose();
+      };
+
+      const inputClasses = `mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md shadow-sm ${theme.ring} ${theme.border}`;
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose}>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <h2 className="text-xl font-bold mb-4">{expense ? 'Editar Lançamento' : 'Novo Lançamento'}</h2>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label>
+              <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required className={inputClasses} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label>
+                <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="123,45" required className={inputClasses} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label>
+                <input type="number" value={totalInstallments} onChange={(e) => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputClasses} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
+              <select value={paymentSource} onChange={(e) => setPaymentSource(e.target.value)} className={inputClasses}>
+                <option>Cartão Guilherme (final 2581)</option>
+                <option>Cartão Thais (final 1009)</option>
+                <option>Cartão Digital (final 7292)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label>
+              <select value={split} onChange={(e) => setSplit(e.target.value)} className={inputClasses}>
+                <option>Dividido</option>
+                <option value={currentUser}>Apenas {currentUser}</option>
+                <option value="Thais">Apenas Thais</option>
+                <option value="Guilherme">Apenas Guilherme</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label>
+              <select value={type} onChange={(e) => setType(e.target.value)} className={inputClasses}>
+                <option>Cartão</option>
+                <option>Pix</option>
+                <option>Boleto</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4">
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
+              <button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button>
+            </div>
+          </form>
+        </Modal>
+      );
+    };
+
+    const App = () => {
+      const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
+      const [db, setDb] = useState(null);
+      const [auth, setAuth] = useState(null);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        const firebaseConfig = {
+          apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
+          authDomain: "meu-acerto-app.firebaseapp.com",
+          projectId: "meu-acerto-app",
+          storageBucket: "meu-acerto-app.appspot.com",
+          messagingSenderId: "326844075367",
+          appId: "1:326844075367:web:0315e86713b1e0071f33c2"
         };
 
-        const App = () => {
-            const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
-            const [db, setDb] = useState(null);
-            const [auth, setAuth] = useState(null);
-            const [error, setError] = useState(null);
+        try {
+          if (firebase.apps.length === 0) {
+            firebase.initializeApp(firebaseConfig);
+          }
+          const firestoreDb = firebase.firestore();
+          const firebaseAuth = firebase.auth();
 
-            useEffect(() => {
-                 const firebaseConfig = {
-                    apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
-                    authDomain: "meu-acerto-app.firebaseapp.com",
-                    projectId: "meu-acerto-app",
-                    storageBucket: "meu-acerto-app.appspot.com",
-                    messagingSenderId: "326844075367",
-                    appId: "1:326844075367:web:0315e86713b1e0071f33c2"
-                };
-                
-                try {
-                    if (firebase.apps.length === 0) {
-                        firebase.initializeApp(firebaseConfig);
-                    }
-                    const firestoreDb = firebase.firestore();
-                    const firebaseAuth = firebase.auth();
-                    
-                    setDb(firestoreDb);
-                    setAuth(firebaseAuth);
-                    
-                    const authenticate = async () => {
-                        try {
-                            await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-                            await firebaseAuth.signInAnonymously();
-                        } catch (err) {
-                            console.error("Auth error:", err);
-                            setError(`Erro de autenticação: ${err.message}. Verifique se o método de login anónimo está ativo no Firebase.`);
-                        }
-                    };
-                    authenticate();
-                } catch (error) { 
-                    console.error("Failed to initialize Firebase:", error); 
-                    setError("Falha ao inicializar o Firebase. Verifique as credenciais."); 
-                }
-            }, []);
+          setDb(firestoreDb);
+          setAuth(firebaseAuth);
 
-            const handleSelectUser = (user) => {
-                setCurrentUser(user);
-                localStorage.setItem('meuAcertoUser', JSON.stringify(user));
-            };
-            const handleLogout = () => {
-                setCurrentUser(null);
-                localStorage.removeItem('meuAcertoUser');
-            };
-            
-            if (error) {
-                return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
+          const authenticate = async () => {
+            try {
+              await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+              await firebaseAuth.signInAnonymously();
+            } catch (err) {
+              console.error("Auth error:", err);
+              setError(`Erro de autenticação: ${err.message}. Verifique se o método de login anónimo está ativo no Firebase.`);
             }
+          };
+          authenticate();
+        } catch (error) {
+          console.error("Failed to initialize Firebase:", error);
+          setError("Falha ao inicializar o Firebase. Verifique as credenciais.");
+        }
+      }, []);
 
-            if (!db || !auth) {
-                return <div className="min-h-screen flex items-center justify-center text-slate-500">A ligar ao servidor...</div>;
-            }
+      const handleSelectUser = (user) => {
+        setCurrentUser(user);
+        localStorage.setItem('meuAcertoUser', JSON.stringify(user));
+      };
+      const handleLogout = () => {
+        setCurrentUser(null);
+        localStorage.removeItem('meuAcertoUser');
+      };
 
-            if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />;
-            
-            return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
-        };
-        
-        window.onload = () => {
-            const root = createRoot(document.getElementById('root'));
-            root.render(<App />);
+      if (error) return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
+      if (!db || !auth) return <div className="min-h-screen flex items-center justify-center text-slate-500">A ligar ao servidor...</div>;
+      if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />;
 
-            // Registo do Service Worker para PWA
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('sw.js')
-                    .then(registration => {
-                        console.log('Service Worker registado com sucesso:', registration);
-                    }).catch(error => {
-                        console.log('Falha ao registar o Service Worker:', error);
-                    });
-            }
-        };
-    </script>
+      return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
+    };
+
+    window.onload = () => {
+      const root = createRoot(document.getElementById('root'));
+      root.render(<App />);
+
+      // PWA - Service Worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js')
+          .then((registration) => console.log('Service Worker registado com sucesso:', registration))
+          .catch((error) => console.log('Falha ao registar o Service Worker:', error));
+      }
+    };
+  </script>
 </body>
 </html>
-
