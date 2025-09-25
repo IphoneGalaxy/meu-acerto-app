@@ -5,13 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meu Acerto</title>
 
-  <!-- Manifest PWA -->
-  <link rel="manifest" href="manifest.json">
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
+  <meta name="theme-color" content="#4338ca" />
+  <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
 
-  <!-- Tailwind -->
+  <!-- UI libs -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- React 18 -->
+  <!-- React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
@@ -25,16 +31,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
-
-  <!-- PWA/ícone -->
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
-  <meta name="theme-color" content="#4338ca" />
-  <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
-
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <style>
     body { font-family: 'Inter', sans-serif; }
@@ -51,7 +47,7 @@
     const { useState, useEffect, useMemo, useRef } = React;
     const { createRoot } = ReactDOM;
 
-    // ---------- Auxiliares ----------
+    // ================== Helpers ==================
     const parseBRFloat = (str) => {
       if (typeof str !== 'string') return typeof str === 'number' ? str : 0;
       const sanitized = str.replace(/\./g, '').replace(',', '.');
@@ -59,12 +55,14 @@
     };
     const formatBRL = (value) =>
       new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'BRL' }).format(value || 0);
+    const norm = (s) =>
+      (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
-    // ---------- Componentes ----------
+    // ================== UI Genéricos ==================
     const Modal = ({ isOpen, onClose, children }) => {
       if (!isOpen) return null;
       return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose}>
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md m-4" onClick={(e) => e.stopPropagation()}>
             {children}
           </div>
@@ -75,15 +73,15 @@
     const UserSelectionScreen = ({ onSelectUser }) => {
       const users = ['Guilherme', 'Thais'];
       return (
-        <div className="min-h-screen flex flex-col justify-center items-center bg-slate-100 dark:bg-slate-900 p-4 w-full">
-          <h1 className="text-4xl font-bold text-slate-800 dark:text-white mb-2">Meu Acerto</h1>
+        <div className="min-h-screen flex flex-col justify-center items-center p-4">
+          <h1 className="text-4xl font-bold mb-2">Meu Acerto</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
           <div className="space-y-4 w-full max-w-xs flex flex-col items-center">
             {users.map((user) => (
               <button
                 key={user}
                 onClick={() => onSelectUser(user)}
-                className={`w-full text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 ${
+                className={`w-full text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-transform hover:scale-105 ${
                   user === 'Thais' ? 'bg-pink-600 hover:bg-pink-700' : 'bg-indigo-600 hover:bg-indigo-700'
                 }`}
               >
@@ -95,6 +93,7 @@
       );
     };
 
+    // ================== Dashboard ==================
     const Dashboard = ({ user, onLogout, db }) => {
       const [expenses, setExpenses] = useState([]);
       const [installmentPlans, setInstallmentPlans] = useState([]);
@@ -119,62 +118,52 @@
 
       useEffect(() => {
         if (!db) return;
-        const unsubscribeExpenses = expensesColRef.onSnapshot((s) =>
-          setExpenses(s.docs.map((doc) => ({ ...doc.data(), id: doc.id })))
+        const unsub1 = expensesColRef.onSnapshot((snap) =>
+          setExpenses(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
         );
-        const unsubscribePlans = plansColRef.onSnapshot((s) =>
-          setInstallmentPlans(s.docs.map((doc) => ({ ...doc.data(), id: doc.id })))
+        const unsub2 = plansColRef.onSnapshot((snap) =>
+          setInstallmentPlans(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
         );
-        return () => { unsubscribeExpenses(); unsubscribePlans(); };
+        return () => { unsub1(); unsub2(); };
       }, [db, expensesColRef, plansColRef]);
 
-      // Geração de parcelas que faltam até hoje
+      // Geração automática de parcelas passadas faltantes
       useEffect(() => {
         if (!db || installmentPlans.length === 0) return;
-
         const generateMissingInstallments = async () => {
           const today = new Date();
           const batch = db.batch();
-          let batchHasWrites = false;
+          let hasWrites = false;
 
           for (const plan of installmentPlans) {
             const [day, month, year] = plan.startDate.split('/');
             const startDate = new Date(year, month - 1, day);
-
             for (let i = 0; i < plan.numberOfInstallments; i++) {
-              const installmentDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
-
-              if (installmentDate <= today) {
-                const installmentPlanId = plan.id;
-                const installmentNumber = i + 1;
-
-                const alreadyExists = expenses.some(
-                  (exp) => exp.installmentPlanId === installmentPlanId && exp.parcela === `${installmentNumber}/${plan.numberOfInstallments}`
+              const instDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
+              if (instDate <= today) {
+                const num = i + 1;
+                const exists = expenses.some(
+                  (e) => e.installmentPlanId === plan.id && e.parcela === `${num}/${plan.numberOfInstallments}`
                 );
-
-                if (!alreadyExists) {
-                  const newExpenseData = {
-                    installmentPlanId,
+                if (!exists) {
+                  const newExpense = {
+                    installmentPlanId: plan.id,
                     description: plan.description,
                     amount: plan.totalAmount / plan.numberOfInstallments,
-                    date: installmentDate.toLocaleDateString('pt-PT'),
-                    parcela: `${installmentNumber}/${plan.numberOfInstallments}`,
+                    date: instDate.toLocaleDateString('pt-PT'),
+                    parcela: `${num}/${plan.numberOfInstallments}`,
                     split: plan.split,
                     type: plan.type,
                     paymentSource: plan.paymentSource,
                     paidBy: plan.paidBy
                   };
-                  const newDocRef = expensesColRef.doc();
-                  batch.set(newDocRef, newExpenseData);
-                  batchHasWrites = true;
+                  batch.set(expensesColRef.doc(), newExpense);
+                  hasWrites = true;
                 }
               }
             }
           }
-
-          if (batchHasWrites) {
-            try { await batch.commit(); } catch (error) { console.error('Error generating installments: ', error); }
-          }
+          if (hasWrites) await batch.commit();
         };
         generateMissingInstallments();
       }, [installmentPlans, expenses, db, expensesColRef]);
@@ -182,236 +171,189 @@
       const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
       const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
 
-      const addSingleExpense = async (expense) => {
-        try { await expensesColRef.add(expense); } catch (error) { console.error('Error adding document: ', error); }
-      };
-
+      const addSingleExpense = async (expense) => { await expensesColRef.add(expense); };
       const addInstallmentPlan = async (plan) => {
-        try {
-          const planDocRef = await plansColRef.add(plan);
-          const firstInstallment = {
-            installmentPlanId: planDocRef.id,
-            description: plan.description,
-            amount: plan.totalAmount / plan.numberOfInstallments,
-            date: plan.startDate,
-            parcela: `1/${plan.numberOfInstallments}`,
-            split: plan.split,
-            type: plan.type,
-            paymentSource: plan.paymentSource,
-            paidBy: plan.paidBy
-          };
-          await expensesColRef.add(firstInstallment);
-        } catch (error) { console.error('Error adding plan: ', error); }
+        const planDocRef = await plansColRef.add(plan);
+        const first = {
+          installmentPlanId: planDocRef.id,
+          description: plan.description,
+          amount: plan.totalAmount / plan.numberOfInstallments,
+          date: plan.startDate,
+          parcela: `1/${plan.numberOfInstallments}`,
+          split: plan.split,
+          type: plan.type,
+          paymentSource: plan.paymentSource,
+          paidBy: plan.paidBy
+        };
+        await expensesColRef.add(first);
       };
-
-      const updateExpense = async (updatedExpense) => {
-        const { id, ...dataToUpdate } = updatedExpense;
-        try { await expensesColRef.doc(id).update(dataToUpdate); } catch (error) { console.error('Error updating document: ', error); }
-      };
-
+      const updateExpense = async ({ id, ...data }) => { await expensesColRef.doc(id).update(data); };
       const confirmAndDeleteExpense = async () => {
         if (!deletingExpenseId) return;
-        try { await expensesColRef.doc(deletingExpenseId).delete(); } catch (error) { console.error('Error deleting document: ', error); }
+        await expensesColRef.doc(deletingExpenseId).delete();
         setDeletingExpenseId(null);
       };
-
       const confirmAndClearAll = async () => {
-        try {
-          const expensesSnapshot = await expensesColRef.get();
-          const plansSnapshot = await plansColRef.get();
-          const batch = db.batch();
-          expensesSnapshot.forEach((doc) => batch.delete(doc.ref));
-          plansSnapshot.forEach((doc) => batch.delete(doc.ref));
-          await batch.commit();
-        } catch (error) {
-          console.error('Erro ao limpar os dados:', error);
-        }
+        const expSnap = await expensesColRef.get();
+        const planSnap = await plansColRef.get();
+        const batch = db.batch();
+        expSnap.forEach((d) => batch.delete(d.ref));
+        planSnap.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
         setIsClearModalOpen(false);
       };
 
-      // ----------- IMPORTAÇÃO (.xls/.xlsx/.csv) COM SENHA 130843 -----------
+      // ======= IMPORTAÇÃO DINÂMICA (XLS/XLSX/CSV + senha + cabeçalho detectado) =======
       const handleFileUpload = (event) => {
         try {
           const file = event.target.files?.[0];
           if (!file) return;
 
-          const PASSWORD = '130843';
-          const reader = new FileReader();
+          const isXLSX = /\.xlsx$/i.test(file.name);
+          const isXLS  = /\.xls$/i.test(file.name);
+          const isCSV  = /\.csv$/i.test(file.name);
 
+          const reader = new FileReader();
           reader.onload = (e) => {
             try {
-              const buf = new Uint8Array(e.target.result);
-              const ext = file.name.toLowerCase().split('.').pop();
               let rows = [];
 
-              if (ext === 'xls' || ext === 'xlsx') {
-                const wb = XLSX.read(buf, { type: 'array', password: PASSWORD });
+              if (isXLSX || isXLS) {
+                const wb = XLSX.read(new Uint8Array(e.target.result), {
+                  type: 'array',
+                  password: '130843',
+                  raw: false
+                });
                 const ws = wb.Sheets[wb.SheetNames[0]];
                 rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-              } else if (ext === 'csv') {
-                const text = new TextDecoder('latin1').decode(buf);
-                rows = text.split(/\r?\n/).map((line) => line.split(','));
+              } else if (isCSV) {
+                const txt = e.target.result;
+                rows = txt.split(/\r?\n/).map((line) => line.split(','));
               } else {
-                alert('Formato não suportado. Use .xls, .xlsx ou .csv.');
+                alert('Formato não suportado. Use .xls, .xlsx ou .csv');
                 return;
               }
 
-              // Detecta a linha do cabeçalho pela presença de “Data de compra”
-              const headerIdx = rows.findIndex(
-                (r) => Array.isArray(r) && r.some((c) => /data.*compra/i.test(String(c || '')))
-              );
-              if (headerIdx < 0) {
-                alert('Cabeçalho "Data de compra" não encontrado.');
+              // Detectar a linha do cabeçalho pela coluna "Data de compra"
+              const headerRowIndex = rows.findIndex((r) => r.some((c) => norm(c) === 'data de compra'));
+              if (headerRowIndex === -1) {
+                alert('Cabeçalho não encontrado (procurei "Data de compra").');
                 return;
               }
+              const header = rows[headerRowIndex];
 
-              const header = rows[headerIdx].map((h) => String(h || '').trim());
-              const col = (regex, fallback = -1) => {
-                const i = header.findIndex((h) => regex.test(h));
-                return i >= 0 ? i : fallback;
+              // Mapear índices por nome (robusto)
+              const idx = {
+                data: header.findIndex((c) => norm(c) === 'data de compra'),
+                finalCartao: header.findIndex((c) => /final.*cartao/.test(norm(c))),
+                descricao: header.findIndex((c) => norm(c) === 'descricao'),
+                parcela: header.findIndex((c) => norm(c) === 'parcela'),
+                valorBRL: header.findIndex((c) => /valor.*em.*r\$/.test(norm(c)))
               };
 
-              // Colunas conforme seu layout (print que você enviou)
-              const COL_DATA   = col(/data.*compra/i, 0);
-              const COL_FINAL  = col(/final.*cart/i, 2);
-              const COL_DESC   = col(/descri/i, 4);
-              const COL_PARC   = col(/parcel/i, 5);
-              const COL_VALORR = col(/valor.*\(.*r\$/i, 8); // "Valor (em R$)"
-
-              if ([COL_DATA, COL_FINAL, COL_DESC, COL_PARC, COL_VALORR].some((i) => i < 0)) {
-                alert('Não consegui mapear todas as colunas. Confira os títulos da planilha.');
+              if (idx.data < 0 || idx.descricao < 0 || idx.valorBRL < 0) {
+                alert('Colunas obrigatórias não encontradas (Data de compra, Descrição, Valor (em R$)).');
                 return;
               }
 
-              const dataRows = rows.slice(headerIdx + 1);
-
-              const parseAmountBRL = (v) => {
-                const s = String(v || '')
-                  .replace(/\s/g, '')
-                  .replace(/R\$\s?/i, '')
-                  .replace(/\./g, '')
-                  .replace(',', '.');
-                const n = parseFloat(s);
-                return Number.isFinite(n) ? n : 0;
-              };
-
-              const isDate = (v) => /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(String(v || '').trim());
+              const dataRows = rows.slice(headerRowIndex + 1);
 
               const allNewExpenses = dataRows
                 .map((row) => {
-                  if (!row || row.length === 0) return null;
+                  const rawDesc = row[idx.descricao];
+                  const rawValor = row[idx.valorBRL];
+                  if (typeof rawDesc !== 'string') return null;
 
-                  const rawDate  = row[COL_DATA];
-                  const rawFinal = row[COL_FINAL];
-                  const rawDesc  = row[COL_DESC];
-                  const rawParc  = row[COL_PARC];
-                  const rawValor = row[COL_VALORR];
-
-                  if (!isDate(rawDate) || !rawDesc) return null;
-
-                  // Ignora “Inclusao de pagamento”
-                  if (String(rawDesc).toLowerCase().includes('inclusao de pagamento')) return null;
-
-                  // Dono/fonte pelo final do cartão
-                  const final = String(rawFinal || '').trim();
-                  let paidBy = 'Digital';
-                  let paymentSource = 'Cartão Digital (final 7292)';
-                  if (final.endsWith('2581')) {
-                    paidBy = 'Guilherme';
-                    paymentSource = 'Cartão Guilherme (final 2581)';
-                  } else if (final.endsWith('1009')) {
-                    paidBy = 'Thais';
-                    paymentSource = 'Cartão Thais (final 1009)';
+                  const descLow = norm(rawDesc);
+                  if (descLow.includes('inclusao de pagamento') || descLow.includes('inclusão de pagamento')) {
+                    return null;
                   }
 
-                  const amount = parseAmountBRL(rawValor);
-                  if (!amount) return null;
+                  const finalCartaoStr = idx.finalCartao >= 0 ? String(row[idx.finalCartao] || '').trim() : '';
+                  let owner, source;
+                  if (finalCartaoStr.endsWith('2581')) { owner = 'Guilherme'; source = 'Cartão Guilherme (final 2581)'; }
+                  else if (finalCartaoStr.endsWith('1009')) { owner = 'Thais'; source = 'Cartão Thais (final 1009)'; }
+                  else { owner = 'Digital'; source = 'Cartão Digital (final 7292)'; }
 
-                  let description = String(rawDesc);
+                  const amount = parseBRFloat(String(rawValor || '0'));
+                  if (isNaN(amount) || amount === 0) return null;
+
+                  let description = String(rawDesc || 'Sem descrição');
                   if (amount < 0) description = `Estorno: ${description}`;
 
-                  const parcela =
-                    rawParc && String(rawParc).trim() !== '' && String(rawParc) !== 'Única'
-                      ? String(rawParc)
+                  const parcelaInfo =
+                    idx.parcela >= 0 && row[idx.parcela] && row[idx.parcela] !== 'Única'
+                      ? String(row[idx.parcela])
                       : null;
 
-                  const date = String(rawDate); // já em dd/mm/aaaa
+                  const dataCompra = row[idx.data] || new Date().toLocaleDateString('pt-PT');
 
                   return {
                     description,
                     amount,
-                    date,
+                    date: dataCompra,
                     split: 'Dividido',
-                    paidBy,
-                    paymentSource,
+                    paidBy: owner,
+                    paymentSource: source,
                     type: 'Cartão',
-                    parcela
+                    parcela: parcelaInfo
                   };
                 })
                 .filter(Boolean);
 
               setImportedExpenses(allNewExpenses);
               setImportModalOpen(true);
-            } catch (err) {
-              console.error('Erro ao processar a planilha:', err);
+            } catch (readError) {
+              console.error('Erro ao processar o ficheiro:', readError);
               alert('Não consegui ler a planilha. Confirme a senha e o layout.');
             }
           };
 
-          // Lê sempre como ArrayBuffer (funciona para xls/xlsx/csv)
-          reader.readAsArrayBuffer(file);
+          if (isXLSX || isXLS) reader.readAsArrayBuffer(file);
+          else if (isCSV) reader.readAsText(file, 'ISO-8859-1');
 
-          // permite reimportar o mesmo arquivo
           event.target.value = null;
         } catch (uploadError) {
           console.error('Erro no upload do ficheiro:', uploadError);
+          alert('Falha no upload do ficheiro.');
         }
       };
-      // --------------------------------------------------------------------
 
       const confirmImport = async () => {
-        const uniqueImportedExpenses = importedExpenses.filter(
-          (imported) =>
-            !expenses.some(
-              (existing) =>
-                existing.description === imported.description &&
-                Math.abs(existing.amount - imported.amount) < 0.01 &&
-                existing.date === imported.date &&
-                existing.parcela === imported.parcela
-            )
+        const uniqueImportedExpenses = importedExpenses.filter((imp) =>
+          !expenses.some(
+            (ex) =>
+              ex.description === imp.description &&
+              Math.abs(ex.amount - imp.amount) < 0.01 &&
+              ex.date === imp.date &&
+              ex.parcela === imp.parcela
+          )
         );
-        try {
-          const batch = db.batch();
-          uniqueImportedExpenses.forEach((expense) => {
-            const newDocRef = expensesColRef.doc();
-            batch.set(newDocRef, expense);
-          });
-          await batch.commit();
-        } catch (error) { console.error('Error importing documents: ', error); }
+        const batch = db.batch();
+        uniqueImportedExpenses.forEach((e) => batch.set(expensesColRef.doc(), e));
+        await batch.commit();
         setImportedExpenses([]);
         setImportModalOpen(false);
       };
 
       const filteredAndSortedExpenses = useMemo(() => {
-        const userVisibleExpenses =
-          user === 'Guilherme'
-            ? expenses.filter((e) => e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
-            : expenses.filter((e) => e.paymentSource.includes('1009'));
-        let filtered = userVisibleExpenses;
+        const userVisible = user === 'Guilherme'
+          ? expenses.filter((e) => e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
+          : expenses.filter((e) => e.paymentSource?.includes('1009'));
+        let filtered = userVisible;
         switch (filter) {
-          case 'Cartão': filtered = userVisibleExpenses.filter((e) => e.type === 'Cartão' && !e.parcela); break;
-          case 'Parcelados': filtered = userVisibleExpenses.filter((e) => !!e.parcela); break;
-          case 'Pix': filtered = userVisibleExpenses.filter((e) => e.type === 'Pix'); break;
-          case 'Boleto': filtered = userVisibleExpenses.filter((e) => e.type === 'Boleto'); break;
-          default: filtered = userVisibleExpenses;
+          case 'Cartão': filtered = userVisible.filter((e) => e.type === 'Cartão' && !e.parcela); break;
+          case 'Parcelados': filtered = userVisible.filter((e) => !!e.parcela); break;
+          case 'Pix': filtered = userVisible.filter((e) => e.type === 'Pix'); break;
+          case 'Boleto': filtered = userVisible.filter((e) => e.type === 'Boleto'); break;
+          default: filtered = userVisible;
         }
         return filtered.sort((a, b) => {
           const aDate = new Date(a.date.split('/').reverse().join('-'));
           const bDate = new Date(b.date.split('/').reverse().join('-'));
           if (filter === 'Todos') {
-            const aIsParcela = !!a.parcela;
-            const bIsParcela = !!b.parcela;
-            if (aIsParcela !== bIsParcela) return aIsParcela ? 1 : -1;
+            const ap = !!a.parcela, bp = !!b.parcela;
+            if (ap !== bp) return ap ? 1 : -1;
           }
           return bDate - aDate;
         });
@@ -424,23 +366,26 @@
           else if (e.split === user) { userTotal += e.amount; }
           else if (e.split === otherUser) { otherUserTotal += e.amount; }
         });
-        const userPaid = expenses.filter((e) => e.paidBy === user).reduce((sum, e) => sum + e.amount, 0);
-        const otherUserPaid = expenses.filter((e) => e.paidBy === otherUser).reduce((sum, e) => sum + e.amount, 0);
+        const userPaid = expenses.filter((e) => e.paidBy === user).reduce((s, e) => s + e.amount, 0);
+        const otherUserPaid = expenses.filter((e) => e.paidBy === otherUser).reduce((s, e) => s + e.amount, 0);
         const balance = otherUserTotal - otherUserPaid;
-        const guilhermeCardTotal = expenses.filter((e) => e.paymentSource.includes('2581')).reduce((s, e) => s + e.amount, 0);
-        const thaisCardTotal = expenses.filter((e) => e.paymentSource.includes('1009')).reduce((s, e) => s + e.amount, 0);
-        const digitalCardTotal = expenses.filter((e) => e.paymentSource.includes('7292')).reduce((s, e) => s + e.amount, 0);
+
+        const sumBy = (needle) => expenses.filter((e) => e.paymentSource?.includes(needle)).reduce((s, e) => s + e.amount, 0);
+        const guilhermeCardTotal = sumBy('2581');
+        const thaisCardTotal     = sumBy('1009');
+        const digitalCardTotal   = sumBy('7292');
         const grandTotal = guilhermeCardTotal + thaisCardTotal + digitalCardTotal;
-        const limiteLiberadoProximoMes = expenses
-          .filter((e) => {
-            const isUserCard = user === 'Guilherme'
-              ? (e.paymentSource.includes('2581') || e.paymentSource.includes('7292'))
-              : e.paymentSource.includes('1009');
-            if (!isUserCard || !e.parcela || typeof e.parcela !== 'string') return false;
-            const [current, total] = e.parcela.split('/').map(Number);
-            return current === total;
-          })
-          .reduce((sum, e) => sum + e.amount, 0);
+
+        const limiteLiberadoProximoMes = expenses.filter((e) => {
+          const isUserCard =
+            user === 'Guilherme'
+              ? (e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
+              : e.paymentSource?.includes('1009');
+          if (!isUserCard || !e.parcela || typeof e.parcela !== 'string') return false;
+          const [c, t] = e.parcela.split('/').map(Number);
+          return c === t;
+        }).reduce((s, e) => s + e.amount, 0);
+
         return { userTotal, otherUserTotal, userPaid, otherUserPaid, balance, guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
       }, [expenses, user, otherUser]);
 
@@ -450,7 +395,8 @@
           <button
             onClick={() => setFilter(label)}
             className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${
-              isActive ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+              isActive ? `${theme.bg} text-white shadow`
+                       : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
             }`}
           >
             {label}
@@ -480,8 +426,7 @@
                 {totals.limiteLiberadoProximoMes > 0 && (
                   <div className="mt-4">
                     <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Próximo Mês</h3>
-                    <p className="text-slate-500 dark:text-slate-400">
-                      Limite liberado:
+                    <p className="text-slate-500 dark:text-slate-400">Limite liberado:
                       <span className="font-bold text-emerald-500 dark:text-emerald-400 ml-1">{formatBRL(totals.limiteLiberadoProximoMes)}</span>
                     </p>
                   </div>
@@ -492,9 +437,7 @@
                 className={`text-slate-500 hover:${theme.text} dark:hover:${theme.darkText} transition`}
                 title="Sair"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
               </button>
             </div>
           </header>
@@ -531,9 +474,7 @@
               onClick={openAddModal}
               className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Adicionar
             </button>
 
@@ -541,30 +482,16 @@
               onClick={() => fileInputRef.current?.click()}
               className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Importar
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".xls,.xlsx,.csv"
-              onChange={handleFileUpload}
-              multiple={false}
-            />
+            <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} multiple={false} />
 
             <button
               onClick={() => setIsClearModalOpen(true)}
               className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
               Limpar
             </button>
           </div>
@@ -585,29 +512,27 @@
               {filteredAndSortedExpenses.length > 0 ? (
                 filteredAndSortedExpenses.map((expense) => {
                   const borderClass =
-                    expense.split === 'Guilherme'
-                      ? themes.Guilherme.borderClass
-                      : expense.split === 'Thais'
-                      ? themes.Thais.borderClass
-                      : 'border-transparent';
+                    expense.split === 'Guilherme' ? themes.Guilherme.borderClass
+                    : expense.split === 'Thais' ? themes.Thais.borderClass
+                    : 'border-transparent';
+
                   let isLastInstallment = false;
                   if (expense.parcela) {
-                    const [current, total] = expense.parcela.split('/').map(Number);
-                    if (current === total) isLastInstallment = true;
+                    const [c, t] = expense.parcela.split('/').map(Number);
+                    if (c === t) isLastInstallment = true;
                   }
+
                   return (
                     <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
                       <div className="flex-grow">
                         <p className="font-semibold flex items-center text-sm sm:text-base">
                           {expense.description}
                           {expense.parcela && (
-                            <span
-                              className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${
-                                isLastInstallment
-                                  ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300'
-                                  : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'
-                              }`}
-                            >
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${
+                              isLastInstallment
+                                ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300'
+                                : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'
+                            }`}>
                               {expense.parcela}
                             </span>
                           )}
@@ -616,21 +541,14 @@
                           {expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}
                         </p>
                       </div>
-
                       <div className="text-right flex-shrink-0 flex items-center gap-2">
-                        <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>
-                          {formatBRL(expense.amount)}
-                        </p>
+                        <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
                         <div className="flex items-center space-x-1">
                           <button onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1" title="Editar">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                            </svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                           </button>
                           <button onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1" title="Excluir">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
-                            </svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                           </button>
                         </div>
                       </div>
@@ -643,6 +561,7 @@
             </div>
           </div>
 
+          {/* Modais */}
           <ExpenseForm
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
@@ -658,16 +577,9 @@
             <div className="p-6">
               <h2 className="text-xl font-bold mb-4">Confirmar Importação</h2>
               <p className="mb-6">
-                Está prestes a adicionar {
-                  importedExpenses.filter(i =>
-                    !expenses.some(e =>
-                      e.description === i.description &&
-                      Math.abs(e.amount - i.amount) < 0.01 &&
-                      e.date === i.date &&
-                      e.parcela === i.parcela
-                    )
-                  ).length
-                } novos lançamentos. Deseja continuar?
+                Está prestes a adicionar {importedExpenses.filter(i =>
+                  !expenses.some(e => e.description === i.description && Math.abs(e.amount - i.amount) < 0.01 && e.date === i.date && e.parcela === i.parcela)
+                ).length} novos lançamentos. Deseja continuar?
               </p>
               <div className="flex justify-end space-x-3">
                 <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
@@ -680,11 +592,7 @@
             <div className="p-6">
               <div className="flex items-center justify-center mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                    <line x1="12" y1="9" x2="12" y2="13"></line>
-                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 </div>
               </div>
               <h2 className="text-xl font-bold mb-2 text-center">Apagar Todos os Dados?</h2>
@@ -710,6 +618,7 @@
       );
     };
 
+    // ================== Formulário ==================
     const ExpenseForm = ({ isOpen, onClose, expense, currentUser, theme, addSingleExpense, addInstallmentPlan, updateExpense }) => {
       const [description, setDescription] = useState('');
       const [amount, setAmount] = useState('');
@@ -755,12 +664,12 @@
             paidBy
           });
         } else {
-          const numInstallments = parseInt(totalInstallments, 10) || 1;
-          if (numInstallments > 1) {
+          const n = parseInt(totalInstallments, 10) || 1;
+          if (n > 1) {
             addInstallmentPlan({
               description,
               totalAmount: parseBRFloat(amount),
-              numberOfInstallments: numInstallments,
+              numberOfInstallments: n,
               startDate: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
               split,
               type,
@@ -789,12 +698,10 @@
         <Modal isOpen={isOpen} onClose={onClose}>
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
             <h2 className="text-xl font-bold mb-4">{expense ? 'Editar Lançamento' : 'Novo Lançamento'}</h2>
-
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label>
               <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required className={inputClasses} />
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label>
@@ -805,12 +712,10 @@
                 <input type="number" value={totalInstallments} onChange={(e) => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} />
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label>
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputClasses} />
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
               <select value={paymentSource} onChange={(e) => setPaymentSource(e.target.value)} className={inputClasses}>
@@ -819,7 +724,6 @@
                 <option>Cartão Digital (final 7292)</option>
               </select>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label>
               <select value={split} onChange={(e) => setSplit(e.target.value)} className={inputClasses}>
@@ -829,7 +733,6 @@
                 <option value="Guilherme">Apenas Guilherme</option>
               </select>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label>
               <select value={type} onChange={(e) => setType(e.target.value)} className={inputClasses}>
@@ -838,7 +741,6 @@
                 <option>Boleto</option>
               </select>
             </div>
-
             <div className="flex justify-end space-x-3 pt-4">
               <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
               <button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button>
@@ -848,6 +750,7 @@
       );
     };
 
+    // ================== App (Firebase + Shell) ==================
     const App = () => {
       const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
       const [db, setDb] = useState(null);
@@ -865,16 +768,13 @@
         };
 
         try {
-          if (firebase.apps.length === 0) {
-            firebase.initializeApp(firebaseConfig);
-          }
+          if (firebase.apps.length === 0) firebase.initializeApp(firebaseConfig);
           const firestoreDb = firebase.firestore();
           const firebaseAuth = firebase.auth();
-
           setDb(firestoreDb);
           setAuth(firebaseAuth);
 
-          const authenticate = async () => {
+          (async () => {
             try {
               await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
               await firebaseAuth.signInAnonymously();
@@ -882,10 +782,9 @@
               console.error("Auth error:", err);
               setError(`Erro de autenticação: ${err.message}. Verifique se o método de login anónimo está ativo no Firebase.`);
             }
-          };
-          authenticate();
-        } catch (error) {
-          console.error("Failed to initialize Firebase:", error);
+          })();
+        } catch (err) {
+          console.error("Failed to initialize Firebase:", err);
           setError("Falha ao inicializar o Firebase. Verifique as credenciais.");
         }
       }, []);
@@ -906,15 +805,14 @@
       return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
     };
 
+    // Mount + Service Worker
     window.onload = () => {
-      const root = createRoot(document.getElementById('root'));
-      root.render(<App />);
-
-      // PWA - Service Worker
+      createRoot(document.getElementById('root')).render(<App />);
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js')
-          .then((registration) => console.log('Service Worker registado com sucesso:', registration))
-          .catch((error) => console.log('Falha ao registar o Service Worker:', error));
+        navigator.serviceWorker.register('sw.js').then(
+          (reg) => console.log('SW registado:', reg),
+          (err) => console.log('Falha ao registar o SW:', err)
+        );
       }
     };
   </script>
