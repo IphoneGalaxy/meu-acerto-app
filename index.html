@@ -112,29 +112,6 @@
       );
     };
 
-    // Seletor de escopo (Geral / Só Cartões / Pix & Boletos)
-    const ScopeSelector = ({ scope, setScope }) => {
-      const Item = ({value, label}) => (
-        <button
-          onClick={() => setScope(value)}
-          className={
-            "px-3 py-1 text-xs sm:text-sm rounded-full font-semibold transition " +
-            (scope === value
-              ? "bg-indigo-600 text-white shadow"
-              : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600")
-          }>
-          {label}
-        </button>
-      );
-      return (
-        <div className="flex gap-1 sm:gap-2">
-          <Item value="geral" label="Geral" />
-          <Item value="cards" label="Só Cartões" />
-          <Item value="pixboleto" label="Pix e Boletos" />
-        </div>
-      );
-    };
-
     const UserSelectionScreen = ({ onSelectUser }) => {
       const users = ['Guilherme', 'Thais'];
       return (
@@ -167,7 +144,6 @@
       const [editingExpense, setEditingExpense] = useState(null);
       const [importedExpenses, setImportedExpenses] = useState([]);
       const [filter, setFilter] = useState('Todos');
-      const [scope, setScope] = useState('geral'); // novo escopo
       const fileInputRef = useRef(null);
 
       const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
@@ -392,44 +368,51 @@
       };
 
       const confirmImport = async () => {
-        const uniqueImportedExpenses = importedExpenses.filter((imp) =>
-          !expenses.some(
-            (ex) =>
-              ex.description === imp.description &&
-              Math.abs(ex.amount - imp.amount) < 0.01 &&
-              ex.date === imp.date &&
-              ex.parcela === imp.parcela
-          )
-        );
-        const batch = db.batch();
-        uniqueImportedExpenses.forEach((e) => batch.set(expensesColRef.doc(), e));
-        await batch.commit();
-        setImportedExpenses([]);
-        setImportModalOpen(false);
-      };
+  try {
+    if (!Array.isArray(importedExpenses) || importedExpenses.length === 0) {
+      setImportModalOpen(false);
+      return;
+    }
+    let uid = null;
+    try { uid = firebase.auth()?.currentUser?.uid || null; } catch (_) {}
 
-      // ======== Escopo (coleção de despesas conforme seletor) ========
-      const expensesInScope = useMemo(() => {
-        if (scope === 'cards') return expenses.filter(e => e.type === 'Cartão');
-        if (scope === 'pixboleto') return expenses.filter(e => e.type === 'Pix' || e.type === 'Boleto');
-        return expenses;
-      }, [expenses, scope]);
+    const snap = await expensesColRef
+      .orderBy('date', 'desc')
+      .limit(2000)
+      .get()
+      .catch(() => ({ empty: true, docs: [] }));
 
-      // ======== Responsabilidades (partes) por escopo ========
-      const scopedParts = useMemo(() => {
-        let g = 0, t = 0;
-        for (const e of expensesInScope) {
-          const a = e.amount || 0;
-          if (e.split === 'Dividido') { g += a/2; t += a/2; }
-          else if (e.split === 'Guilherme') { g += a; }
-          else if (e.split === 'Thais') { t += a; }
-        }
-        const diff = Math.abs(g - t);
-        const who = g > t ? 'Guilherme' : (t > g ? 'Thais' : null);
-        return { g, t, diff, who };
-      }, [expensesInScope]);
+    const existing = snap.empty ? [] : snap.docs.map(d => d.data());
 
-      // ======== Lista filtrada (UI Lançamentos) — não depende do escopo ========
+    const isSame = (a, b) => (
+      String(a.description || '').trim().toLowerCase() === String(b.description || '').trim().toLowerCase() &&
+      Math.abs((a.amount || 0) - (b.amount || 0)) < 0.01 &&
+      String(a.date || '') === String(b.date || '') &&
+      String(a.parcela || '') === String(b.parcela || '')
+    );
+
+    const unique = importedExpenses.filter(imp => !existing.some(ex => isSame(ex, imp)));
+
+    if (unique.length === 0) {
+      setImportedExpenses([]);
+      setImportModalOpen(false);
+      return;
+    }
+
+    const batch = db.batch();
+    unique.forEach(e => {
+      const payload = { ...e, createdAt: firebase.firestore.FieldValue.serverTimestamp(), uid: uid || undefined };
+      batch.set(expensesColRef.doc(), payload);
+    });
+    await batch.commit();
+    setImportedExpenses([]);
+    setImportModalOpen(false);
+  } catch (err) {
+    console.error('Erro ao confirmar importação:', err);
+    alert('Falha ao gravar os lançamentos importados. Tente novamente.');
+  }
+};;
+
       const filteredAndSortedExpenses = useMemo(() => {
         const userVisible = user === 'Guilherme'
           ? expenses.filter((e) => e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
@@ -453,8 +436,17 @@
         });
       }, [expenses, filter, user]);
 
-      // ======== Totais de fatura (somente para exibição) ========
       const totals = useMemo(() => {
+        let userTotal = 0, otherUserTotal = 0;
+        expenses.forEach((e) => {
+          if (e.split === 'Dividido') { userTotal += e.amount / 2; otherUserTotal += e.amount / 2; }
+          else if (e.split === user) { userTotal += e.amount; }
+          else if (e.split === otherUser) { otherUserTotal += e.amount; }
+        });
+        const userPaid = expenses.filter((e) => e.paidBy === user).reduce((s, e) => s + e.amount, 0);
+        const otherUserPaid = expenses.filter((e) => e.paidBy === otherUser).reduce((s, e) => s + e.amount, 0);
+        const balance = otherUserTotal - otherUserPaid;
+
         const sumBy = (needle) => expenses.filter((e) => e.paymentSource?.includes(needle)).reduce((s, e) => s + e.amount, 0);
         const guilhermeCardTotal = sumBy('2581');
         const thaisCardTotal     = sumBy('1009');
@@ -471,16 +463,15 @@
           return c === t;
         }).reduce((s, e) => s + e.amount, 0);
 
-        return { guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
-      }, [expenses, user]);
+        return { userTotal, otherUserTotal, userPaid, otherUserPaid, balance, guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
+      }, [expenses, user, otherUser]);
 
-      // ======== UI ========
       const FilterButton = ({ label }) => {
         const isActive = filter === label;
         return (
           <button
             onClick={() => setFilter(label)}
-            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${isActive ? 'bg-indigo-600 text-white shadow' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
+            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${isActive ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
           >
             {label}
           </button>
@@ -494,25 +485,18 @@
               <h1 className="text-2xl font-bold">Olá, {user}</h1>
               <p className="text-slate-500 dark:text-slate-400">Resumo das suas despesas.</p>
             </div>
-
             <div className="flex items-start justify-between w-full sm:w-auto sm:space-x-6">
-              <div className="text-left sm:text-right text-sm w-full sm:w-auto">
-                <div className="mb-2 flex flex-col gap-2 sm:items-end">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-2">
-                    <h3 className="font-semibold text-slate-600 dark:text-slate-400">Total Faturas</h3>
-                    {/* Seletor dentro deste bloco */}
-                    <ScopeSelector scope={scope} setScope={setScope} />
-                  </div>
-
+              <div className="text-left sm:text-right text-sm">
+                <div>
+                  <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Faturas</h3>
                   <div className="space-y-1 text-slate-500 dark:text-slate-400">
                     <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.guilhermeCardTotal)}</span></p>
                     <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.thaisCardTotal)}</span></p>
                     <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.digitalCardTotal)}</span></p>
                     <hr className="my-2 border-slate-200 dark:border-slate-700" />
-                    <p className="font-bold">Total Geral: <span className="text-indigo-400">{formatBRL(totals.grandTotal)}</span></p>
+                    <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(totals.grandTotal)}</span></p>
                   </div>
                 </div>
-
                 {totals.limiteLiberadoProximoMes > 0 && (
                   <div className="mt-4">
                     <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Próximo Mês</h3>
@@ -522,10 +506,9 @@
                   </div>
                 )}
               </div>
-
               <button
                 onClick={onLogout}
-                className={"text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition"}
+                className={`text-slate-500 hover:${theme.text} dark:hover:${theme.darkText} transition`}
                 title="Sair"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -534,53 +517,35 @@
           </header>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {/* Acerto de Contas (respeita o escopo selecionado) */}
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
-              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Acerto de Contas</h3>
-              <div>
-                {user === 'Guilherme' ? (
-                  <>
-                    <p className="text-sm">Thais deve reembolsar</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-emerald-500">{formatBRL(scopedParts.t)}</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm">Você deve reembolsar Guilherme</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-amber-400">{formatBRL(scopedParts.t)}</p>
-                  </>
-                )}
-              </div>
-              <hr className="my-4 border-slate-200 dark:border-slate-700" />
-              <div>
-                <h4 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Diferença nos gastos</h4>
-                <p className="text-xl font-bold text-sky-400">{formatBRL(scopedParts.diff)}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  {scopedParts.who ? `${scopedParts.who} gastou a mais` : 'Empate'}
-                </p>
-              </div>
+              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Resultado Final</h3>
+              {totals.balance >= 0 ? (
+                <div>
+                  <p className="text-sm">{otherUser} deve pagar-lhe</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500">{formatBRL(totals.balance)}</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm">Deve pagar a {otherUser}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-500">{formatBRL(Math.abs(totals.balance))}</p>
+                </div>
+              )}
             </div>
 
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
               <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Detalhes</h3>
               <div className="text-sm space-y-2">
-                {user === 'Guilherme' ? (
-                  <>
-                    <p>A sua parte: <span className="font-semibold">{formatBRL(scopedParts.g)}</span></p>
-                    <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(scopedParts.t)}</span></p>
-                  </>
-                ) : (
-                  <>
-                    <p>A sua parte: <span className="font-semibold">{formatBRL(scopedParts.t)}</span></p>
-                    <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(scopedParts.g)}</span></p>
-                  </>
-                )}
+                <p>A sua parte: <span className="font-semibold">{formatBRL(totals.userTotal)}</span></p>
+                <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserTotal)}</span></p>
+                <p>Total pago por si: <span className="font-semibold">{formatBRL(totals.userPaid)}</span></p>
+                <p>Total pago por {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserPaid)}</span></p>
               </div>
             </div>
           </div>
 
           <div className="flex space-x-2 mb-6">
             <button
-              onClick={() => { setEditingExpense(null); setIsModalOpen(true); }}
+              onClick={openAddModal}
               className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -621,8 +586,8 @@
               {filteredAndSortedExpenses.length > 0 ? (
                 filteredAndSortedExpenses.map((expense) => {
                   const borderClass =
-                    expense.split === 'Guilherme' ? 'border-indigo-500'
-                    : expense.split === 'Thais' ? 'border-pink-500'
+                    expense.split === 'Guilherme' ? themes.Guilherme.borderClass
+                    : expense.split === 'Thais' ? themes.Thais.borderClass
                     : 'border-transparent';
 
                   let isLastInstallment = false;
