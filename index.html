@@ -51,35 +51,21 @@
     const norm = (s) =>
       (s ?? '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
-    // Conversor robusto de dinheiro (pt/BRL)
+    // Conversor de dinheiro robusto e corrigido
     const parseMoney = (input) => {
       if (typeof input === 'number') return input;
-      if (input == null) return 0;
+      if (input == null || typeof input !== 'string') return NaN;
 
-      let s = String(input)
-        .replace(/\u00A0/g, '')      // NBSP
-        .replace(/[\sR$]/gi, '')     // remove espaços e "R$"
-        .trim();
+      const s = input.replace(/R\$\s?/gi, '').trim();
 
-      const hasComma = s.includes(',');
-      const hasDot   = s.includes('.');
-
-      if (hasComma && hasDot) {
-        // separador decimal = o último a aparecer
-        const lastComma = s.lastIndexOf(',');
-        const lastDot   = s.lastIndexOf('.');
-        const dec = lastComma > lastDot ? ',' : '.';
-        const thou = dec === ',' ? '.' : ',';
-        s = s.replace(new RegExp('\\' + thou, 'g'), '');
-        s = s.replace(dec, '.');
-      } else if (hasComma) {
-        s = s.replace(/\./g, '').replace(',', '.');
-      } else {
-        s = s.replace(/,/g, '');
+      if (/^-?\d+\.\d{2}$/.test(s) && !s.includes(',')) {
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? n : NaN;
       }
 
-      const n = parseFloat(s);
-      return isNaN(n) ? 0 : n;
+      const finalString = s.replace(/\./g, '').replace(',', '.');
+      const n = parseFloat(finalString);
+      return Number.isFinite(n) ? n : NaN;
     };
 
     // Serial Excel ou string -> dd/mm/aaaa
@@ -139,12 +125,17 @@
       const [installmentPlans, setInstallmentPlans] = useState([]);
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [isImportModalOpen, setImportModalOpen] = useState(false);
+      const [isImporting, setIsImporting] = useState(false);
       const [isClearModalOpen, setIsClearModalOpen] = useState(false);
       const [deletingExpenseId, setDeletingExpenseId] = useState(null);
       const [editingExpense, setEditingExpense] = useState(null);
       const [importedExpenses, setImportedExpenses] = useState([]);
       const [filter, setFilter] = useState('Todos');
+      const [scope, setScope] = useState('geral');
       const fileInputRef = useRef(null);
+      
+      // arredondar em 2 casas para evitar ruído de ponto flutuante
+      const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 
       const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
       const themes = {
@@ -178,6 +169,9 @@
           for (const plan of installmentPlans) {
             const [day, month, year] = plan.startDate.split('/');
             const startDate = new Date(year, month - 1, day);
+            const perInstallment = round2(plan.totalAmount / plan.numberOfInstallments);
+            const lastInstallment = round2(plan.totalAmount - perInstallment * (plan.numberOfInstallments - 1));
+
             for (let i = 0; i < plan.numberOfInstallments; i++) {
               const instDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
               if (instDate <= today) {
@@ -189,7 +183,7 @@
                   const newExpense = {
                     installmentPlanId: plan.id,
                     description: plan.description,
-                    amount: plan.totalAmount / plan.numberOfInstallments,
+                    amount: num === plan.numberOfInstallments ? lastInstallment : perInstallment,
                     date: instDate.toLocaleDateString('pt-PT'),
                     parcela: `${num}/${plan.numberOfInstallments}`,
                     split: plan.split,
@@ -206,7 +200,7 @@
           if (hasWrites) await batch.commit();
         };
         generateMissingInstallments();
-      }, [installmentPlans, expenses, db, expensesColRef]);
+      }, [installmentPlans, expenses, db]);
 
       const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
       const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
@@ -214,10 +208,11 @@
       const addSingleExpense = async (expense) => { await expensesColRef.add(expense); };
       const addInstallmentPlan = async (plan) => {
         const planDocRef = await plansColRef.add(plan);
+        const perInstallment = round2(plan.totalAmount / plan.numberOfInstallments);
         const first = {
           installmentPlanId: planDocRef.id,
           description: plan.description,
-          amount: plan.totalAmount / plan.numberOfInstallments,
+          amount: perInstallment,
           date: plan.startDate,
           parcela: `1/${plan.numberOfInstallments}`,
           split: plan.split,
@@ -242,9 +237,37 @@
         await batch.commit();
         setIsClearModalOpen(false);
       };
+      
+      // --- AJUSTE / REEMBOLSO ---
+      const settleReembolso = async () => {
+        if (Math.abs(gBalance) < 0.01) return; // nada a ajustar
+        const value = Math.abs(gBalance);
+        const today = new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });
 
-      // ======= IMPORTAÇÃO (XLS/XLSX/CSV + senha + cabeçalho detectado) =======
-      const handleFileUpload = (event) => {
+        // descrição amigável
+        const desc =
+          gBalance > 0
+            ? `Reembolso: Thais → Guilherme`
+            : `Reembolso: Guilherme → Thais`;
+
+        // Estratégia:
+        // - gBalance > 0  (Thais deve G): criar lançamento NEGATIVO pago por G (reduz gPaid)
+        // - gBalance < 0  (G deve Thais): criar lançamento POSITIVO pago por G (aumenta gPaid)
+        const amount = gBalance > 0 ? -value : value;
+
+        await expensesColRef.add({
+          description: desc,
+          amount,
+          date: today,
+          split: 'Dividido',           // não impacta partes (ignoraremos "Ajuste" nas partes)
+          type: 'Ajuste',              // tipo especial para diferenciar
+          paymentSource: 'Ajuste',
+          paidBy: 'Guilherme',         // fixo, pois o nosso saldo é calculado em cima de gPaid
+          parcela: null
+        });
+      };
+
+      const handleFileUpload = async (event) => {
         try {
           const file = event.target.files?.[0];
           if (!file) return;
@@ -253,112 +276,136 @@
           const isXLS  = /\.xls$/i.test(file.name);
           const isCSV  = /\.csv$/i.test(file.name);
 
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            try {
-              let rows = [];
+          console.log('Arquivo lido:', file.name);
 
-              if (isXLSX || isXLS) {
-                const wb = XLSX.read(new Uint8Array(e.target.result), {
-                  type: 'array',
-                  password: '130843', // funciona mesmo sem senha
-                });
-                const ws = wb.Sheets[wb.SheetNames[0]];
-                rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
-              } else if (isCSV) {
-                const txt = e.target.result;
-                // Delimitador ; ou ,
-                const scoreSemi  = (txt.match(/;/g) || []).length;
-                const scoreComma = (txt.match(/,/g) || []).length;
-                const delim = scoreSemi > scoreComma ? ';' : ',';
-                rows = txt.split(/\r?\n/).map(line =>
+          try {
+            let rows;
+            let headerRowIndex = -1;
+
+            if (isXLSX || isXLS) {
+              const buffer = await file.arrayBuffer();
+              const wb = XLSX.read(new Uint8Array(buffer), {
+                type: 'array',
+                password: '130843',
+              });
+              const ws = wb.Sheets[wb.SheetNames[0]];
+              rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+              headerRowIndex = rows.findIndex((r) => r.some((c) => norm(c).includes('data') && norm(c).includes('compra')));
+            } else if (isCSV) {
+              const tryRead = (enc) => new Promise((resolve) => {
+                const r = new FileReader();
+                r.onload = () => resolve(r.result);
+                r.readAsText(file, enc);
+              });
+
+              const parseCsvContent = (text) => {
+                let txt = text;
+                if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1); // Strip BOM
+
+                const tryParseDelim = (delim) => txt.split(/\r?\n/).map(line =>
                   line.split(delim).map(c => c.replace(/^"(.*)"$/, '$1').replace(/""/g, '"'))
                 );
-              } else {
-                alert('Formato não suportado. Use .xls, .xlsx ou .csv');
-                return;
-              }
 
-              // Detecta cabeçalho pela coluna "Data de compra"
-              const headerRowIndex = rows.findIndex((r) => r.some((c) => norm(c) === 'data de compra'));
-              if (headerRowIndex === -1) {
-                alert('Cabeçalho não encontrado (procurei "Data de compra").');
-                return;
-              }
-              const header = rows[headerRowIndex];
+                let candidateRows = tryParseDelim(';');
+                let hIndex = candidateRows.findIndex(r => r.some(c => norm(c).includes('data') && norm(c).includes('compra')));
 
-              // Índices por nome (robusto)
-              const idx = {
-                data: header.findIndex((c) => norm(c) === 'data de compra'),
-                finalCartao: header.findIndex((c) => /final.*cartao/.test(norm(c)) || norm(c) === 'final do cartao'),
-                descricao: header.findIndex((c) => norm(c) === 'descricao'),
-                parcela: header.findIndex((c) => norm(c) === 'parcela'),
-                valorBRL: header.findIndex((c) => /valor.*em.*r\$/.test(norm(c)))
+                if (hIndex === -1) {
+                  candidateRows = tryParseDelim(',');
+                  hIndex = candidateRows.findIndex(r => r.some(c => norm(c).includes('data') && norm(c).includes('compra')));
+                }
+                return { rows: candidateRows, headerIndex: hIndex };
               };
+              
+              let txtUtf8 = await tryRead('utf-8');
+              let result = parseCsvContent(txtUtf8);
 
-              if (idx.data < 0 || idx.descricao < 0 || idx.valorBRL < 0) {
-                alert('Colunas obrigatórias não encontradas (Data de compra, Descrição, Valor (em R$)).');
-                return;
+              if (result.headerIndex === -1) {
+                let txtIso = await tryRead('ISO-8859-1');
+                result = parseCsvContent(txtIso);
               }
 
-              const dataRows = rows.slice(headerRowIndex + 1);
-
-              const allNewExpenses = dataRows
-                .map((row) => {
-                  const rawDesc  = row[idx.descricao];
-                  const rawValor = row[idx.valorBRL];
-                  if (!rawDesc && !rawValor) return null; // linha vazia
-
-                  const descStr = String(rawDesc || '');
-                  const descLow = norm(descStr);
-                  if (descLow.includes('inclusao de pagamento') || descLow.includes('inclusão de pagamento')) {
-                    return null;
-                  }
-
-                  // Final do cartão
-                  const finalCartaoStr = idx.finalCartao >= 0 ? String(row[idx.finalCartao] || '').trim() : '';
-                  let owner, source;
-                  if (finalCartaoStr.endsWith('2581')) { owner = 'Guilherme'; source = 'Cartão Guilherme (final 2581)'; }
-                  else if (finalCartaoStr.endsWith('1009')) { owner = 'Thais'; source = 'Cartão Thais (final 1009)'; }
-                  else { owner = 'Digital'; source = 'Cartão Digital (final 7292)'; }
-
-                  // Valor
-                  const amount = parseMoney(rawValor);
-                  if (!amount) return null;
-
-                  let description = descStr || 'Sem descrição';
-                  if (amount < 0) description = `Estorno: ${description}`;
-
-                  const parcelaInfo =
-                    idx.parcela >= 0 && row[idx.parcela] && row[idx.parcela] !== 'Única'
-                      ? String(row[idx.parcela])
-                      : null;
-
-                  const dataCompra = excelSerialToPT(row[idx.data]) || new Date().toLocaleDateString('pt-PT');
-
-                  return {
-                    description,
-                    amount,
-                    date: dataCompra,
-                    split: 'Dividido',
-                    paidBy: owner,
-                    paymentSource: source,
-                    type: 'Cartão',
-                    parcela: parcelaInfo
-                  };
-                })
-                .filter(Boolean);
-
-              setImportedExpenses(allNewExpenses);
-              setImportModalOpen(true);
-            } catch (readError) {
-              console.error('Erro ao processar o ficheiro:', readError);
-              alert('Não consegui ler a planilha. Confirme a senha e o layout.');
+              rows = result.rows;
+              headerRowIndex = result.headerIndex;
+            } else {
+              alert('Formato não suportado. Use .xls, .xlsx ou .csv');
+              return;
             }
-          };
 
-          if (isXLSX || isXLS) reader.readAsArrayBuffer(file);
-          else if (isCSV) reader.readAsText(file, 'ISO-8859-1');
+            if (headerRowIndex === -1) {
+              alert('Cabeçalho não encontrado (procurei "Data de compra").');
+              return;
+            }
+            const header = rows[headerRowIndex];
+
+            const getIndex = (pred) => header.findIndex((c) => pred(norm(c)));
+            const idx = {
+              data:        getIndex(c => c.includes('data') && c.includes('compra')), // "data de compra" / "data da compra"
+              finalCartao: getIndex(c => /final.*cart(a|ã)o/.test(c) || c === 'final do cartao'),
+              descricao:   getIndex(c => c === 'descricao' || c.includes('descri')),
+              parcela:     getIndex(c => c.includes('parcela')),
+              valorBRL:    getIndex(c => c.includes('valor') && (c.includes('r$') || c.includes('brl')))
+            };
+
+            if (idx.data < 0 || idx.descricao < 0 || idx.valorBRL < 0) {
+              console.log('Header detectado:', header);
+              console.log('Idx:', idx);
+              alert('Colunas obrigatórias não encontradas (Data de compra, Descrição, Valor).');
+              return;
+            }
+
+            const dataRows = rows.slice(headerRowIndex + 1).filter(r => r.some(c => String(c).trim() !== ''));
+
+            const allNewExpenses = dataRows
+              .map((row) => {
+                const rawDesc  = row[idx.descricao];
+                const rawValor = row[idx.valorBRL];
+                if (!rawDesc && !rawValor) return null;
+
+                const descStr = String(rawDesc || '');
+                const descLow = norm(descStr);
+                if (descLow.includes('inclusao de pagamento') || descLow.includes('inclusão de pagamento')) {
+                  return null;
+                }
+
+                const finalCartaoStr = idx.finalCartao >= 0 ? String(row[idx.finalCartao] || '').trim() : '';
+                let owner, source;
+                if (finalCartaoStr.endsWith('2581')) { owner = 'Guilherme'; source = 'Cartão Guilherme (final 2581)'; }
+                else if (finalCartaoStr.endsWith('1009')) { owner = 'Thais'; source = 'Cartão Thais (final 1009)'; }
+                else { owner = 'Digital'; source = 'Cartão Digital (final 7292)'; }
+
+                const amount = parseMoney(rawValor);
+                if (!Number.isFinite(amount)) return null;
+
+                let description = descStr || 'Sem descrição';
+                if (amount < 0) description = `Estorno: ${description}`;
+
+                const parcelaInfo =
+                  idx.parcela >= 0 && row[idx.parcela] && row[idx.parcela] !== 'Única'
+                    ? String(row[idx.parcela])
+                    : null;
+
+                const dataCompra = excelSerialToPT(row[idx.data]) || new Date().toLocaleDateString('pt-PT');
+
+                return {
+                  description,
+                  amount,
+                  date: dataCompra,
+                  split: 'Dividido',
+                  paidBy: owner,
+                  paymentSource: source,
+                  type: 'Cartão',
+                  parcela: parcelaInfo
+                };
+              })
+              .filter(Boolean);
+            
+            console.log('Linhas parseadas:', rows.length, 'Novos lançamentos:', allNewExpenses.length);
+            setImportedExpenses(allNewExpenses);
+            setImportModalOpen(true);
+          } catch (readError) {
+            console.error('Erro ao processar o ficheiro:', readError);
+            alert('Não consegui ler a planilha. Confirme a senha e o layout.');
+          }
 
           event.target.value = null;
         } catch (uploadError) {
@@ -368,50 +415,25 @@
       };
 
       const confirmImport = async () => {
-  try {
-    if (!Array.isArray(importedExpenses) || importedExpenses.length === 0) {
-      setImportModalOpen(false);
-      return;
-    }
-    let uid = null;
-    try { uid = firebase.auth()?.currentUser?.uid || null; } catch (_) {}
-
-    const snap = await expensesColRef
-      .orderBy('date', 'desc')
-      .limit(2000)
-      .get()
-      .catch(() => ({ empty: true, docs: [] }));
-
-    const existing = snap.empty ? [] : snap.docs.map(d => d.data());
-
-    const isSame = (a, b) => (
-      String(a.description || '').trim().toLowerCase() === String(b.description || '').trim().toLowerCase() &&
-      Math.abs((a.amount || 0) - (b.amount || 0)) < 0.01 &&
-      String(a.date || '') === String(b.date || '') &&
-      String(a.parcela || '') === String(b.parcela || '')
-    );
-
-    const unique = importedExpenses.filter(imp => !existing.some(ex => isSame(ex, imp)));
-
-    if (unique.length === 0) {
-      setImportedExpenses([]);
-      setImportModalOpen(false);
-      return;
-    }
-
-    const batch = db.batch();
-    unique.forEach(e => {
-      const payload = { ...e, createdAt: firebase.firestore.FieldValue.serverTimestamp(), uid: uid || undefined };
-      batch.set(expensesColRef.doc(), payload);
-    });
-    await batch.commit();
-    setImportedExpenses([]);
-    setImportModalOpen(false);
-  } catch (err) {
-    console.error('Erro ao confirmar importação:', err);
-    alert('Falha ao gravar os lançamentos importados. Tente novamente.');
-  }
-};;
+        if (isImporting) return;
+        setIsImporting(true);
+        const uniqueImportedExpenses = importedExpenses.filter((imp) =>
+          !expenses.some(
+            (ex) =>
+              ex.description === imp.description &&
+              Math.abs(ex.amount - imp.amount) < 0.01 &&
+              ex.date === imp.date &&
+              ex.parcela === imp.parcela &&
+              ex.paymentSource === imp.paymentSource
+          )
+        );
+        const batch = db.batch();
+        uniqueImportedExpenses.forEach((e) => batch.set(expensesColRef.doc(), e));
+        await batch.commit();
+        setImportedExpenses([]);
+        setImportModalOpen(false);
+        setIsImporting(false);
+      };
 
       const filteredAndSortedExpenses = useMemo(() => {
         const userVisible = user === 'Guilherme'
@@ -435,43 +457,103 @@
           return bDate - aDate;
         });
       }, [expenses, filter, user]);
-
-      const totals = useMemo(() => {
-        let userTotal = 0, otherUserTotal = 0;
-        expenses.forEach((e) => {
-          if (e.split === 'Dividido') { userTotal += e.amount / 2; otherUserTotal += e.amount / 2; }
-          else if (e.split === user) { userTotal += e.amount; }
-          else if (e.split === otherUser) { otherUserTotal += e.amount; }
-        });
-        const userPaid = expenses.filter((e) => e.paidBy === user).reduce((s, e) => s + e.amount, 0);
-        const otherUserPaid = expenses.filter((e) => e.paidBy === otherUser).reduce((s, e) => s + e.amount, 0);
-        const balance = otherUserTotal - otherUserPaid;
-
-        const sumBy = (needle) => expenses.filter((e) => e.paymentSource?.includes(needle)).reduce((s, e) => s + e.amount, 0);
+      
+      const cardTotals = useMemo(() => {
+        const sumBy = (needle) =>
+          round2(
+            expenses
+              .filter((e) => e.type !== 'Ajuste') // ajustes fora do "Total Faturas"
+              .filter((e) => e.paymentSource?.includes(needle))
+              .reduce((s, e) => s + e.amount, 0)
+          );
         const guilhermeCardTotal = sumBy('2581');
         const thaisCardTotal     = sumBy('1009');
         const digitalCardTotal   = sumBy('7292');
-        const grandTotal = guilhermeCardTotal + thaisCardTotal + digitalCardTotal;
+        const grandTotal = round2(guilhermeCardTotal + thaisCardTotal + digitalCardTotal);
+        return { guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal };
+      }, [expenses]);
 
-        const limiteLiberadoProximoMes = expenses.filter((e) => {
-          const isUserCard =
-            user === 'Guilherme'
-              ? (e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
-              : e.paymentSource?.includes('1009');
-          if (!isUserCard || !e.parcela || typeof e.parcela !== 'string') return false;
-          const [c, t] = e.parcela.split('/').map(Number);
-          return c === t;
-        }).reduce((s, e) => s + e.amount, 0);
+      const parts = useMemo(() => {
+        let g = 0, t = 0;
+        const sourceBase =
+          expenses.filter(e => e.type !== 'Ajuste'); // ajuste não entra nas partes
+        const source =
+          (scope === 'geral')
+            ? sourceBase
+            : (scope === 'cartao')
+              ? sourceBase.filter(e => e.type === 'Cartão')
+              : sourceBase.filter(e => e.type === 'Pix' || e.type === 'Boleto');
+        
+        for (const e of source) {
+          const splitVal = (e.split || '').toString();
+          if (splitVal === 'Dividido') { g += e.amount / 2; t += e.amount / 2; }
+          else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += e.amount;
+          else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += e.amount;
+          else { g += e.amount / 2; t += e.amount / 2; }
+        }
+        return { g: round2(g), t: round2(t) };
+      }, [expenses, scope]);
 
-        return { userTotal, otherUserTotal, userPaid, otherUserPaid, balance, guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal, limiteLiberadoProximoMes };
-      }, [expenses, user, otherUser]);
+      const { gPaid, tPaid } = useMemo(() => {
+        let gPaid = 0, tPaid = 0;
+        const source =
+          (scope === 'geral')
+            ? expenses // em "geral", consideramos Ajuste para acertar o saldo
+            : (scope === 'cartao')
+              ? expenses.filter(e => e.type === 'Cartão')
+              : expenses.filter(e => e.type === 'Pix' || e.type === 'Boleto');
+        
+        for (const e of source) {
+          const paidBy = e.paidBy || 'Guilherme'; // Default to Guilherme if missing
+          if (paidBy === 'Guilherme' || paidBy === 'Digital') {
+            gPaid += e.amount;
+          } else if (paidBy === 'Thais') {
+            tPaid += e.amount;
+          }
+        }
+        return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
+      }, [expenses, scope]);
+      
+      const gBalance = round2(gPaid - parts.g);
 
-      const FilterButton = ({ label }) => {
+      const { reembolsoLabel, reembolsoValor, reembolsoCor } = useMemo(() => {
+        if (Math.abs(gBalance) < 0.01) {
+          return {
+            reembolsoLabel: 'Contas em dia!',
+            reembolsoValor: 0,
+            reembolsoCor: 'text-emerald-500'
+          };
+        }
+        if (gBalance > 0) { // Guilherme paid more, Thais owes him
+          return {
+            reembolsoLabel: user === 'Guilherme' ? 'Thais deve reembolsar você' : 'Você deve reembolsar Guilherme',
+            reembolsoValor: gBalance,
+            reembolsoCor: user === 'Guilherme' ? 'text-emerald-500' : 'text-amber-400'
+          };
+        } else { // Guilherme paid less, he owes Thais
+          return {
+            reembolsoLabel: user === 'Guilherme' ? 'Você deve reembolsar Thais' : 'Thais deve reembolsar você',
+            reembolsoValor: Math.abs(gBalance),
+            reembolsoCor: user === 'Guilherme' ? 'text-amber-400' : 'text-emerald-500'
+          };
+        }
+      }, [gBalance, user]);
+
+      const diffValor = round2(Math.abs(gPaid - tPaid));
+      const diffQuem = gPaid > tPaid ? 'Guilherme' : (tPaid > gPaid ? 'Thais' : null);
+      const myPart    = round2(user === 'Guilherme' ? parts.g : parts.t);
+      const otherPart = round2(user === 'Guilherme' ? parts.t : parts.g);
+      
+      const FilterButton = ({ label, filter, setFilter, theme }) => {
         const isActive = filter === label;
         return (
           <button
             onClick={() => setFilter(label)}
-            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${isActive ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
+            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${
+              isActive
+                ? `${theme.bg} text-white shadow`
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+            }`}
           >
             {label}
           </button>
@@ -490,82 +572,94 @@
                 <div>
                   <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Faturas</h3>
                   <div className="space-y-1 text-slate-500 dark:text-slate-400">
-                    <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.guilhermeCardTotal)}</span></p>
-                    <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.thaisCardTotal)}</span></p>
-                    <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(totals.digitalCardTotal)}</span></p>
+                    <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.guilhermeCardTotal)}</span></p>
+                    <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.thaisCardTotal)}</span></p>
+                    <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.digitalCardTotal)}</span></p>
                     <hr className="my-2 border-slate-200 dark:border-slate-700" />
-                    <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(totals.grandTotal)}</span></p>
+                    <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(cardTotals.grandTotal)}</span></p>
                   </div>
                 </div>
-                {totals.limiteLiberadoProximoMes > 0 && (
-                  <div className="mt-4">
-                    <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Próximo Mês</h3>
-                    <p className="text-slate-500 dark:text-slate-400">Limite liberado:
-                      <span className="font-bold text-emerald-500 dark:text-emerald-400 ml-1">{formatBRL(totals.limiteLiberadoProximoMes)}</span>
-                    </p>
-                  </div>
-                )}
               </div>
               <button
+                aria-label="Sair"
                 onClick={onLogout}
-                className={`text-slate-500 hover:${theme.text} dark:hover:${theme.darkText} transition`}
+                className={
+                  `text-slate-500 transition ` +
+                  (user === 'Guilherme'
+                    ? 'hover:text-indigo-600 dark:hover:text-indigo-400'
+                    : 'hover:text-pink-600 dark:hover:text-pink-400')
+                }
                 title="Sair"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
               </button>
             </div>
           </header>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
-              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Resultado Final</h3>
-              {totals.balance >= 0 ? (
-                <div>
-                  <p className="text-sm">{otherUser} deve pagar-lhe</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-500">{formatBRL(totals.balance)}</p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm">Deve pagar a {otherUser}</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-red-500">{formatBRL(Math.abs(totals.balance))}</p>
-                </div>
-              )}
+              <h3 className="font-semibold mb-4 text-slate-600 dark:text-slate-400">Acerto de Contas</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {[
+                  { key: 'geral', label: 'Geral' },
+                  { key: 'cartao', label: 'Só Cartões' },
+                  { key: 'pixboleto', label: 'Pix e Boletos' },
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setScope(opt.key)}
+                    className={
+                      `px-3 py-1.5 rounded-full text-sm font-semibold transition ` +
+                      (scope === opt.key
+                        ? `${theme.bg} text-white shadow`
+                        : `bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600`)
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-slate-500 dark:text-slate-400 mb-1">
+                {reembolsoLabel}
+              </p>
+              <p className={`${reembolsoCor} text-3xl sm:text-4xl font-extrabold`}>
+                {formatBRL(reembolsoValor)}
+              </p>
+              <div className="mt-4">
+                <button
+                  onClick={settleReembolso}
+                  disabled={Math.abs(gBalance) < 0.01}
+                  className={`px-4 py-2 rounded-lg font-semibold text-white disabled:opacity-50 ${theme.bg} ${theme.hoverBg}`}
+                  title="Lança um ajuste para zerar o saldo"
+                >
+                  Marcar reembolso
+                </button>
+              </div>
+              <hr className="my-4 border-slate-200 dark:border-slate-700" />
+              <div>
+                <h4 className="font-semibold mb-1 text-slate-600 dark:text-slate-400">Diferença nos gastos</h4>
+                <p className="text-sky-400 text-2xl font-bold">{formatBRL(diffValor)}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {diffQuem ? `${diffQuem} pagou a mais` : 'Empate'}
+                </p>
+              </div>
             </div>
 
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
               <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Detalhes</h3>
               <div className="text-sm space-y-2">
-                <p>A sua parte: <span className="font-semibold">{formatBRL(totals.userTotal)}</span></p>
-                <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserTotal)}</span></p>
-                <p>Total pago por si: <span className="font-semibold">{formatBRL(totals.userPaid)}</span></p>
-                <p>Total pago por {otherUser}: <span className="font-semibold">{formatBRL(totals.otherUserPaid)}</span></p>
+                <p>A sua parte: <span className="font-semibold">{formatBRL(myPart)}</span></p>
+                <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(otherPart)}</span></p>
               </div>
             </div>
           </div>
 
           <div className="flex space-x-2 mb-6">
-            <button
-              onClick={openAddModal}
-              className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Adicionar
-            </button>
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              Importar
-            </button>
+            <button onClick={openAddModal} className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>Adicionar</button>
+            <button onClick={() => fileInputRef.current?.click()} className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>Importar</button>
             <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} multiple={false} />
-
-            <button
-              onClick={() => setIsClearModalOpen(true)}
-              className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <button onClick={() => setIsClearModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
               Limpar
             </button>
           </div>
@@ -574,64 +668,41 @@
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 px-2">
               <h2 className="text-xl font-bold mb-3 sm:mb-0">Lançamentos</h2>
               <div className="flex flex-wrap gap-1 sm:gap-2 justify-start">
-                <FilterButton label="Todos" />
-                <FilterButton label="Cartão" />
-                <FilterButton label="Parcelados" />
-                <FilterButton label="Pix" />
-                <FilterButton label="Boleto" />
+                <FilterButton label="Todos" filter={filter} setFilter={setFilter} theme={theme} />
+                <FilterButton label="Cartão" filter={filter} setFilter={setFilter} theme={theme} />
+                <FilterButton label="Parcelados" filter={filter} setFilter={setFilter} theme={theme} />
+                <FilterButton label="Pix" filter={filter} setFilter={setFilter} theme={theme} />
+                <FilterButton label="Boleto" filter={filter} setFilter={setFilter} theme={theme} />
               </div>
             </div>
-
             <div className="space-y-2">
-              {filteredAndSortedExpenses.length > 0 ? (
-                filteredAndSortedExpenses.map((expense) => {
-                  const borderClass =
-                    expense.split === 'Guilherme' ? themes.Guilherme.borderClass
-                    : expense.split === 'Thais' ? themes.Thais.borderClass
-                    : 'border-transparent';
-
-                  let isLastInstallment = false;
-                  if (expense.parcela) {
-                    const [c, t] = expense.parcela.split('/').map(Number);
-                    if (c === t) isLastInstallment = true;
-                  }
-
-                  return (
-                    <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
-                      <div className="flex-grow">
-                        <p className="font-semibold flex items-center text-sm sm:text-base">
-                          {expense.description}
-                          {expense.parcela && (
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${isLastInstallment ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>
-                              {expense.parcela}
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                          {expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0 flex items-center gap-2">
-                        <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
-                        <div className="flex items-center space-x-1">
-                          <button onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1" title="Editar">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-                          </button>
-                          <button onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1" title="Excluir">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                          </button>
-                        </div>
+              {filteredAndSortedExpenses.length > 0 ? filteredAndSortedExpenses.map(expense => {
+                const borderClass = expense.split === 'Guilherme' ? themes.Guilherme.borderClass : expense.split === 'Thais' ? themes.Thais.borderClass : 'border-transparent';
+                let isLastInstallment = false;
+                if (expense.parcela) { const [current, total] = expense.parcela.split('/').map(Number); if (current === total) isLastInstallment = true; }
+                return (
+                  <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
+                    <div className="flex-grow">
+                      <p className="font-semibold flex items-center text-sm sm:text-base">
+                        {expense.description}
+                        {expense.parcela && (<span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${isLastInstallment ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>{expense.parcela}</span>)}
+                      </p>
+                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0 flex items-center gap-2">
+                      <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                        Pago por: {expense.paidBy || (expense.paymentSource?.includes('Thais') ? 'Thais' : 'Guilherme')}
+                      </span>
+                      <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
+                      <div className="flex items-center space-x-1">
+                        <button aria-label="Editar lançamento" onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg></button>
+                        <button aria-label="Excluir lançamento" onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg></button>
                       </div>
                     </div>
-                  );
-                })
-              ) : (
-                <p className="text-center text-slate-500 dark:text-slate-400 py-8">Nenhum lançamento para este filtro.</p>
-              )}
+                  </div>
+                )}) : (<p className="text-center text-slate-500 dark:text-slate-400 py-8">Nenhum lançamento para este filtro.</p>)}
             </div>
           </div>
-
-          {/* Modais */}
           <ExpenseForm
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
@@ -642,27 +713,27 @@
             addInstallmentPlan={addInstallmentPlan}
             updateExpense={updateExpense}
           />
-
           <Modal isOpen={isImportModalOpen} onClose={() => setImportModalOpen(false)}>
             <div className="p-6">
               <h2 className="text-xl font-bold mb-4">Confirmar Importação</h2>
-              <p className="mb-6">
-                Está prestes a adicionar {importedExpenses.filter(i =>
-                  !expenses.some(e => e.description === i.description && Math.abs(e.amount - i.amount) < 0.01 && e.date === i.date && e.parcela === i.parcela)
-                ).length} novos lançamentos. Deseja continuar?
-              </p>
+              <p className="mb-6">Está prestes a adicionar {importedExpenses.filter(i => !expenses.some(e => e.description === i.description && Math.abs(e.amount - i.amount) < 0.01 && e.date === i.date && e.parcela === i.parcela && e.paymentSource === i.paymentSource)).length} novos lançamentos. Deseja continuar?</p>
               <div className="flex justify-end space-x-3">
                 <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
-                <button onClick={confirmImport} className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`} disabled={importedExpenses.length === 0}>Confirmar</button>
+                <button
+                  onClick={confirmImport}
+                  className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg} disabled:opacity-60`}
+                  disabled={importedExpenses.length === 0 || isImporting}
+                >
+                  {isImporting ? 'A importar…' : 'Confirmar'}
+                </button>
               </div>
             </div>
           </Modal>
-
           <Modal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)}>
             <div className="p-6">
               <div className="flex items-center justify-center mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
                 </div>
               </div>
               <h2 className="text-xl font-bold mb-2 text-center">Apagar Todos os Dados?</h2>
@@ -673,7 +744,6 @@
               </div>
             </div>
           </Modal>
-
           <Modal isOpen={!!deletingExpenseId} onClose={() => setDeletingExpenseId(null)}>
             <div className="p-6">
               <h2 className="text-xl font-bold mb-2 text-center">Excluir Lançamento?</h2>
@@ -688,7 +758,6 @@
       );
     };
 
-    // ================== Formulário ==================
     const ExpenseForm = ({ isOpen, onClose, expense, currentUser, theme, addSingleExpense, addInstallmentPlan, updateExpense }) => {
       const [description, setDescription] = useState('');
       const [amount, setAmount] = useState('');
@@ -723,16 +792,7 @@
         e.preventDefault();
         const paidBy = paymentSource.includes('Guilherme') ? 'Guilherme' : (paymentSource.includes('Thais') ? 'Thais' : 'Digital');
         if (expense) {
-          updateExpense({
-            ...expense,
-            description,
-            amount: parseMoney(amount),
-            date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
-            split,
-            type,
-            paymentSource,
-            paidBy
-          });
+          updateExpense({ ...expense, description, amount: parseMoney(amount), date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }), split, type, paymentSource, paidBy });
         } else {
           const n = parseInt(totalInstallments, 10) || 1;
           if (n > 1) {
@@ -768,53 +828,16 @@
         <Modal isOpen={isOpen} onClose={onClose}>
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
             <h2 className="text-xl font-bold mb-4">{expense ? 'Editar Lançamento' : 'Novo Lançamento'}</h2>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label>
-              <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required className={inputClasses} />
-            </div>
+            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label><input type="text" value={description} onChange={e => setDescription(e.target.value)} required className={inputClasses} /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label>
-                <input type="text" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="123,45" required className={inputClasses} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label>
-                <input type="number" value={totalInstallments} onChange={(e) => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} />
-              </div>
+              <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label><input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="123,45" required className={inputClasses} /></div>
+              <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label><input type="number" value={totalInstallments} onChange={e => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} /></div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={inputClasses} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
-              <select value={paymentSource} onChange={(e) => setPaymentSource(e.target.value)} className={inputClasses}>
-                <option>Cartão Guilherme (final 2581)</option>
-                <option>Cartão Thais (final 1009)</option>
-                <option>Cartão Digital (final 7292)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label>
-              <select value={split} onChange={(e) => setSplit(e.target.value)} className={inputClasses}>
-                <option>Dividido</option>
-                <option value={currentUser}>Apenas {currentUser}</option>
-                <option value="Thais">Apenas Thais</option>
-                <option value="Guilherme">Apenas Guilherme</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label>
-              <select value={type} onChange={(e) => setType(e.target.value)} className={inputClasses}>
-                <option>Cartão</option>
-                <option>Pix</option>
-                <option>Boleto</option>
-              </select>
-            </div>
-            <div className="flex justify-end space-x-3 pt-4">
-              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
-              <button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button>
-            </div>
+            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label><input type="date" value={date} onChange={e => setDate(e.target.value)} required className={inputClasses} /></div>
+            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label><select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className={inputClasses}><option>Cartão Guilherme (final 2581)</option><option>Cartão Thais (final 1009)</option><option>Cartão Digital (final 7292)</option></select></div>
+            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value="Guilherme">Apenas Guilherme</option><option value="Thais">Apenas Thais</option></select></div>
+            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label><select value={type} onChange={e => setType(e.target.value)} className={inputClasses}><option>Cartão</option><option>Pix</option><option>Boleto</option></select></div>
+            <div className="flex justify-end space-x-3 pt-4"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button><button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button></div>
           </form>
         </Modal>
       );
@@ -822,9 +845,12 @@
 
     // ================== App (Firebase + Shell) ==================
     const App = () => {
-      const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
+      const [currentUser, setCurrentUser] = useState(() =>
+        JSON.parse(localStorage.getItem('meuAcertoUser') || 'null')
+      );
       const [db, setDb] = useState(null);
       const [auth, setAuth] = useState(null);
+      const [authed, setAuthed] = useState(false);   // <— novo
       const [error, setError] = useState(null);
 
       useEffect(() => {
@@ -844,15 +870,22 @@
           setDb(firestoreDb);
           setAuth(firebaseAuth);
 
+          // Listener garante que só seguimos quando o usuário anónimo existir
+          const unsub = firebaseAuth.onAuthStateChanged((u) => setAuthed(!!u));
+
           (async () => {
             try {
               await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+              // se já estiver anónimo, isso não cria outra sessão
               await firebaseAuth.signInAnonymously();
             } catch (err) {
               console.error("Auth error:", err);
-              setError(`Erro de autenticação: ${err.message}. Verifique se o método de login anónimo está ativo no Firebase.`);
+              setError(`Erro de autenticação: ${err.message}. Verifique se o login anónimo está ativo no Firebase.`);
             }
           })();
+
+          // cleanup do listener
+          return () => unsub();
         } catch (err) {
           console.error("Failed to initialize Firebase:", err);
           setError("Falha ao inicializar o Firebase. Verifique as credenciais.");
@@ -868,8 +901,21 @@
         localStorage.removeItem('meuAcertoUser');
       };
 
-      if (error) return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
-      if (!db || !auth) return <div className="min-h-screen flex items-center justify-center text-slate-500">A ligar ao servidor...</div>;
+      if (error)
+        return (
+          <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">
+            {error}
+          </div>
+        );
+
+      // Gate também verifica "authed"
+      if (!db || !auth || !authed)
+        return (
+          <div className="min-h-screen flex items-center justify-center text-slate-500">
+            A ligar ao servidor...
+          </div>
+        );
+
       if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />;
 
       return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
@@ -888,3 +934,4 @@
   </script>
 </body>
 </html>
+
