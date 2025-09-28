@@ -238,33 +238,271 @@
         setIsClearModalOpen(false);
       };
       
-      // --- AJUSTE / REEMBOLSO ---
-      const settleReembolso = async () => {
-        if (Math.abs(gBalance) < 0.01) return; // nada a ajustar
-        const value = Math.abs(gBalance);
-        const today = new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+      // --- EXPORTAR XLSX (com cartão importável, detalhado, pix/boletos e resumo) ---
+      const exportXLSX = () => {
+        try {
+          if (!expenses || expenses.length === 0) {
+            alert('Não há lançamentos para exportar.');
+            return;
+          }
 
-        // descrição amigável
-        const desc =
-          gBalance > 0
-            ? `Reembolso: Thais → Guilherme`
-            : `Reembolso: Guilherme → Thais`;
+          const toPT = (d) => {
+            if (!d) return '';
+            if (typeof d === 'string' && d.includes('/')) return d; // dd/mm/aaaa
+            return new Date(d).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+          };
+          const parsePTDate = (pt) => {
+            const [dd, mm, yyyy] = String(pt).split('/').map(Number);
+            return new Date(yyyy, (mm || 1) - 1, dd || 1);
+          };
+          const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+          const last4 = (src = '', paidBy = '') => {
+            const s = String(src || '');
+            if (s.includes('2581')) return '2581';
+            if (s.includes('1009')) return '1009';
+            if (s.includes('7292')) return '7292';
+            if (paidBy === 'Digital') return '7292';
+            if (paidBy === 'Guilherme') return '2581';
+            if (paidBy === 'Thais') return '1009';
+            return '';
+          };
+          const exclusivoDe = (splitVal) => {
+            const v = (splitVal || '').toString();
+            if (v === 'Guilherme' || v === 'Apenas Guilherme') return 'Guilherme';
+            if (v === 'Thais' || v === 'Apenas Thais') return 'Thais';
+            return 'Dividido';
+          };
+          const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
-        // Estratégia:
-        // - gBalance > 0  (Thais deve G): criar lançamento NEGATIVO pago por G (reduz gPaid)
-        // - gBalance < 0  (G deve Thais): criar lançamento POSITIVO pago por G (aumenta gPaid)
-        const amount = gBalance > 0 ? -value : value;
+          const clean = expenses.filter((e) => e.type !== 'Ajuste');
 
-        await expensesColRef.add({
-          description: desc,
-          amount,
-          date: today,
-          split: 'Dividido',           // não impacta partes (ignoraremos "Ajuste" nas partes)
-          type: 'Ajuste',              // tipo especial para diferenciar
-          paymentSource: 'Ajuste',
-          paidBy: 'Guilherme',         // fixo, pois o nosso saldo é calculado em cima de gPaid
-          parcela: null
-        });
+          const dates = clean.map((e) => parsePTDate(e.date).getTime());
+          const minDatePT = dates.length ? toPT(new Date(Math.min(...dates))) : '';
+          const maxDatePT = dates.length ? toPT(new Date(Math.max(...dates))) : '';
+
+          const soCartao = clean.filter((e) => e.type === 'Cartão');
+
+          const sumByNeedle = (needle) =>
+            round2(
+              soCartao
+                .filter((e) => (e.paymentSource || '').includes(needle))
+                .reduce((s, e) => s + Number(e.amount || 0), 0)
+            );
+          const total2581 = sumByNeedle('2581');
+          const total1009 = sumByNeedle('1009');
+          const total7292 = sumByNeedle('7292');
+          const totalFaturas = round2(total2581 + total1009 + total7292);
+
+          const partsGeral = (() => {
+            let g = 0, t = 0;
+            for (const e of clean) {
+              const v = Number(e.amount || 0);
+              const splitVal = (e.split || '').toString();
+              if (splitVal === 'Dividido' || !splitVal) { g += v/2; t += v/2; }
+              else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += v;
+              else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += v;
+              else { g += v/2; t += v/2; }
+            }
+            return { g: round2(g), t: round2(t) };
+          })();
+
+          const pagoPorGeral = (() => {
+            let gPaid = 0, tPaid = 0;
+            for (const e of clean) {
+              const v = Number(e.amount || 0);
+              const p = e.paidBy || 'Guilherme';
+              if (p === 'Guilherme' || p === 'Digital') gPaid += v;
+              else if (p === 'Thais') tPaid += v;
+            }
+            return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
+          })();
+
+          const diffGeral = round2(Math.abs(pagoPorGeral.gPaid - pagoPorGeral.tPaid));
+          const quemPagouMaisGeral =
+            pagoPorGeral.gPaid > pagoPorGeral.tPaid ? 'Guilherme' :
+            pagoPorGeral.tPaid > pagoPorGeral.gPaid ? 'Thais' : 'Empate';
+
+          const gBalanceGeral = round2(pagoPorGeral.gPaid - partsGeral.g);
+          const reembolsoGeralValor = round2(Math.abs(gBalanceGeral));
+          const reembolsoGeralQuem =
+            gBalanceGeral > 0 ? 'Thais → Guilherme' :
+            gBalanceGeral < 0 ? 'Guilherme → Thais' : 'Ninguém';
+
+          const hoje = new Date();
+          const currY = hoje.getFullYear();
+          const currM = hoje.getMonth() + 1;
+          const inMesAtual = clean.filter((e) => {
+            const [dd, mm, yy] = String(e.date).split('/').map(Number);
+            return yy === currY && mm === currM;
+          });
+
+          const partsMes = (() => {
+            let g = 0, t = 0;
+            for (const e of inMesAtual) {
+              const v = Number(e.amount || 0);
+              const splitVal = (e.split || '').toString();
+              if (splitVal === 'Dividido' || !splitVal) { g += v/2; t += v/2; }
+              else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += v;
+              else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += v;
+              else { g += v/2; t += v/2; }
+            }
+            return { g: round2(g), t: round2(t) };
+          })();
+          const pagoPorMes = (() => {
+            let gPaid = 0, tPaid = 0;
+            for (const e of inMesAtual) {
+              const v = Number(e.amount || 0);
+              const p = e.paidBy || 'Guilherme';
+              if (p === 'Guilherme' || p === 'Digital') gPaid += v;
+              else if (p === 'Thais') tPaid += v;
+            }
+            return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
+          })();
+          const diffMes = round2(Math.abs(pagoPorMes.gPaid - pagoPorMes.tPaid));
+          const quemPagouMaisMes =
+            pagoPorMes.gPaid > pagoPorMes.tPaid ? 'Guilherme' :
+            pagoPorMes.tPaid > pagoPorMes.gPaid ? 'Thais' : 'Empate';
+          const gBalanceMes = round2(pagoPorMes.gPaid - partsMes.g);
+          const reembolsoMesValor = round2(Math.abs(gBalanceMes));
+          const reembolsoMesQuem =
+            gBalanceMes > 0 ? 'Thais → Guilherme' :
+            gBalanceMes < 0 ? 'Guilherme → Thais' : 'Ninguém';
+
+          const nextMonthFirst = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+          const nextMonthLast  = new Date(hoje.getFullYear(), hoje.getMonth() + 2, 0);
+
+          let liberarProximoMes = 0;
+          let restanteTotal = 0;
+
+          for (const plan of (installmentPlans || [])) {
+            if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
+
+            const [d, m, y] = String(plan.startDate).split('/').map(Number);
+            const start = new Date(y, (m || 1) - 1, d || 1);
+            const per = round2(Number(plan.totalAmount) / Number(plan.numberOfInstallments));
+            const last = round2(Number(plan.totalAmount) - per * (Number(plan.numberOfInstallments) - 1));
+
+            for (let i = 0; i < Number(plan.numberOfInstallments); i++) {
+              const dt = new Date(start.getFullYear(), start.getMonth() + i, start.getDate());
+              const amt = (i === Number(plan.numberOfInstallments) - 1) ? last : per;
+
+              if (dt > hoje) restanteTotal += amt;
+              if (dt >= nextMonthFirst && dt <= nextMonthLast) liberarProximoMes += amt;
+            }
+          }
+          liberarProximoMes = round2(liberarProximoMes);
+          restanteTotal = round2(restanteTotal);
+
+          // ----- Sheet 1: Cartão (importável) -----
+          const cartaoHeader = ['Data de compra', 'Final do cartão', 'Descrição', 'Parcela', 'Valor (R$)'];
+          const cartaoRows = soCartao
+            .slice()
+            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
+            .map((e) => [
+              toPT(e.date),
+              last4(e.paymentSource, e.paidBy),
+              e.description || '',
+              e.parcela || 'Única',
+              round2(e.amount),
+            ]);
+
+          // ----- Sheet 2: Cartão (detalhado) -----
+          const cartaoDetHeader = ['Data de compra', 'Final do cartão', 'Descrição', 'Parcela', 'Valor (R$)', 'Divisão', 'Pago por', 'Exclusivo'];
+          const cartaoDetRows = soCartao
+            .slice()
+            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
+            .map((e) => [
+              toPT(e.date),
+              last4(e.paymentSource, e.paidBy),
+              e.description || '',
+              e.parcela || 'Única',
+              round2(e.amount),
+              e.split || 'Dividido',
+              e.paidBy || '',
+              exclusivoDe(e.split),
+            ]);
+
+          // ----- Sheet 3: Pix e Boletos -----
+          const pbHeader = ['Data', 'Tipo', 'Descrição', 'Divisão', 'Pago por', 'Valor (R$)'];
+          const pbRows = clean
+            .filter((e) => e.type === 'Pix' || e.type === 'Boleto')
+            .slice()
+            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
+            .map((e) => [
+              toPT(e.date),
+              e.type,
+              e.description || '',
+              e.split || 'Dividido',
+              e.paidBy || '',
+              round2(e.amount),
+            ]);
+
+          // ----- Sheet 4: Resumo -----
+          const resumoHeader = ['Item', 'Valor', 'Obs.'];
+          const resumoRows = [
+            ['Período dos dados', `${minDatePT} até ${maxDatePT}`, ''],
+            [],
+            ['Totais de fatura (Cartões)', '', ''],
+            ['Cartão Guilherme (2581)', total2581, ''],
+            ['Cartão Thais (1009)', total1009, ''],
+            ['Cartão Digital (7292)', total7292, ''],
+            ['Total Geral Cartões', totalFaturas, ''],
+            [],
+            ['Partes (Geral)', '', ''],
+            ['Parte Guilherme', partsGeral.g, 'Somatório pela divisão de cada lançamento'],
+            ['Parte Thais', partsGeral.t, ''],
+            [],
+            ['Pago por (Geral)', '', ''],
+            ['Guilherme + Digital', pagoPorGeral.gPaid, ''],
+            ['Thais', pagoPorGeral.tPaid, ''],
+            ['Diferença (quem pagou mais)', diffGeral, quemPagouMaisGeral],
+            ['Reembolso sugerido (Geral)', reembolsoGeralValor, reembolsoGeralQuem],
+            [],
+            ['NO MÊS ATUAL', '', `Referência: ${ymd(new Date(currY, currM-1, 1))}`],
+            ['Parte Guilherme (mês)', partsMes.g, ''],
+            ['Parte Thais (mês)', partsMes.t, ''],
+            ['Pago por Guilherme + Digital (mês)', pagoPorMes.gPaid, ''],
+            ['Pago por Thais (mês)', pagoPorMes.tPaid, ''],
+            ['Diferença (mês)', diffMes, quemPagouMaisMes],
+            ['Reembolso sugerido (mês)', reembolsoMesValor, reembolsoMesQuem],
+            [],
+            ['PARCELADOS', '', ''],
+            ['A liberar no próximo mês', liberarProximoMes, 'Somatória das parcelas que caem no mês que vem'],
+            ['Restante total de parcelados', restanteTotal, 'Tudo que ainda vai cair (a partir de hoje)'],
+          ];
+
+          const wb = XLSX.utils.book_new();
+
+          const ws1 = XLSX.utils.aoa_to_sheet([cartaoHeader, ...cartaoRows]);
+          ws1['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 48 }, { wch: 12 }, { wch: 12 }];
+          ws1['!autofilter'] = { ref: 'A1:E' + (cartaoRows.length + 1) };
+          XLSX.utils.book_append_sheet(wb, ws1, 'Cartão (importável)');
+
+          const ws2 = XLSX.utils.aoa_to_sheet([cartaoDetHeader, ...cartaoDetRows]);
+          ws2['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 48 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+          ws2['!autofilter'] = { ref: 'A1:H' + (cartaoDetRows.length + 1) };
+          XLSX.utils.book_append_sheet(wb, ws2, 'Cartão (detalhado)');
+
+          const ws3 = XLSX.utils.aoa_to_sheet([pbHeader, ...pbRows]);
+          ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 48 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
+          ws3['!autofilter'] = { ref: 'A1:F' + (pbRows.length + 1) };
+          XLSX.utils.book_append_sheet(wb, ws3, 'Pix e Boletos');
+
+          const ws4 = XLSX.utils.aoa_to_sheet([resumoHeader, ...resumoRows]);
+          ws4['!cols'] = [{ wch: 34 }, { wch: 18 }, { wch: 40 }];
+          ws4['!autofilter'] = { ref: 'A1:C' + (resumoRows.length + 1) };
+          XLSX.utils.book_append_sheet(wb, ws4, 'Resumo');
+
+          const hojeNome = new Date().toISOString().slice(0, 10);
+          const nome = (minDatePT && maxDatePT)
+            ? `meu_acerto_${minDatePT.replaceAll('/','-')}_a_${maxDatePT.replaceAll('/','-')}.xlsx`
+            : `meu_acerto_${hojeNome}.xlsx`;
+          XLSX.writeFile(wb, nome);
+
+        } catch (err) {
+          console.error('Falha ao exportar XLSX:', err);
+          alert('Não consegui exportar o arquivo .xlsx');
+        }
       };
 
       const handleFileUpload = async (event) => {
@@ -638,12 +876,11 @@
               </p>
               <div className="mt-4">
                 <button
-                  onClick={settleReembolso}
-                  disabled={Math.abs(gBalance) < 0.01}
-                  className={`px-4 py-2 rounded-lg font-semibold text-white disabled:opacity-50 ${theme.bg} ${theme.hoverBg}`}
-                  title="Lança um ajuste para zerar o saldo"
+                  onClick={exportXLSX}
+                  className={`px-4 py-2 rounded-lg font-semibold text-white ${theme.bg} ${theme.hoverBg}`}
+                  title="Exportar Excel com cartões, pix/boletos e resumo"
                 >
-                  Marcar reembolso
+                  Exportar Excel
                 </button>
               </div>
               <hr className="my-4 border-slate-200 dark:border-slate-700" />
