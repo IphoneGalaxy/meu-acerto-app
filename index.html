@@ -437,8 +437,13 @@
 
       const filteredAndSortedExpenses = useMemo(() => {
         const userVisible = user === 'Guilherme'
-          ? expenses.filter((e) => e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
-          : expenses.filter((e) => e.paymentSource?.includes('1009'));
+          ? expenses.filter(e => e.type === 'Cartão'
+              ? (e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
+              : (e.paidBy === 'Guilherme' || e.paidBy === 'Digital'))
+          : expenses.filter(e => e.type === 'Cartão'
+              ? e.paymentSource?.includes('1009')
+              : e.paidBy === 'Thais');
+
         let filtered = userVisible;
         switch (filter) {
           case 'Cartão': filtered = userVisible.filter((e) => e.type === 'Cartão' && !e.parcela); break;
@@ -458,18 +463,24 @@
         });
       }, [expenses, filter, user]);
       
+      // Totais de fatura (conta só cartões)
       const cardTotals = useMemo(() => {
         const sumBy = (needle) =>
           round2(
             expenses
-              .filter((e) => e.type !== 'Ajuste') // ajustes fora do "Total Faturas"
+              .filter((e) => e.type === 'Cartão')        // <- só cartão
               .filter((e) => e.paymentSource?.includes(needle))
               .reduce((s, e) => s + e.amount, 0)
           );
+
         const guilhermeCardTotal = sumBy('2581');
         const thaisCardTotal     = sumBy('1009');
         const digitalCardTotal   = sumBy('7292');
-        const grandTotal = round2(guilhermeCardTotal + thaisCardTotal + digitalCardTotal);
+
+        const grandTotal = round2(
+          guilhermeCardTotal + thaisCardTotal + digitalCardTotal
+        );
+
         return { guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal };
       }, [expenses]);
 
@@ -687,11 +698,19 @@
                         {expense.description}
                         {expense.parcela && (<span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${isLastInstallment ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>{expense.parcela}</span>)}
                       </p>
-                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{expense.date} - {expense.paymentSource || expense.paidBy} - {expense.split} - {expense.type}</p>
+                      {(() => {
+                         const isCard = expense.type === 'Cartão';
+                         const srcLabel = isCard ? (expense.paymentSource || expense.paidBy) : expense.type; // Pix/Boleto
+                         return (
+                           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                             {expense.date} - {srcLabel} - {expense.split}{isCard ? ' - Cartão' : ''}
+                           </p>
+                         );
+                       })()}
                     </div>
                     <div className="text-right flex-shrink-0 flex items-center gap-2">
                       <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 whitespace-nowrap">
-                        Pago por: {expense.paidBy || (expense.paymentSource?.includes('Thais') ? 'Thais' : 'Guilherme')}
+                        Pago por: {expense.paidBy}
                       </span>
                       <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
                       <div className="flex items-center space-x-1">
@@ -763,6 +782,7 @@
       const [amount, setAmount] = useState('');
       const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
       const [paymentSource, setPaymentSource] = useState('');
+      const [paidByLocal, setPaidByLocal] = useState(currentUser === 'Guilherme' ? 'Guilherme' : 'Thais');
       const [split, setSplit] = useState('Dividido');
       const [type, setType] = useState('Cartão');
       const [totalInstallments, setTotalInstallments] = useState('1');
@@ -773,7 +793,8 @@
           setDescription(expense.description);
           setAmount(String(expense.amount).replace('.', ','));
           setDate(expense.date ? new Date(expense.date.split('/').reverse().join('-')).toISOString().split('T')[0] : '');
-          setPaymentSource(expense.paymentSource || defaultSource);
+          setPaymentSource(expense.type === 'Cartão' ? (expense.paymentSource || defaultSource) : '');
+          setPaidByLocal(expense.paidBy || (currentUser === 'Guilherme' ? 'Guilherme' : 'Thais'));
           setSplit(expense.split);
           setType(expense.type || 'Cartão');
           setTotalInstallments(expense.parcela ? expense.parcela.split('/')[1] : '1');
@@ -782,6 +803,7 @@
           setAmount('');
           setDate(new Date().toISOString().split('T')[0]);
           setPaymentSource(defaultSource);
+          setPaidByLocal(currentUser === 'Guilherme' ? 'Guilherme' : 'Thais');
           setSplit('Dividido');
           setType('Cartão');
           setTotalInstallments('1');
@@ -790,9 +812,14 @@
 
       const handleSubmit = (e) => {
         e.preventDefault();
-        const paidBy = paymentSource.includes('Guilherme') ? 'Guilherme' : (paymentSource.includes('Thais') ? 'Thais' : 'Digital');
+        const isCard = type === 'Cartão';
+        const paidBy = isCard
+          ? (paymentSource.includes('Thais') ? 'Thais' : paymentSource.includes('Guilherme') ? 'Guilherme' : 'Digital')
+          : paidByLocal;
+        const finalPaymentSource = isCard ? paymentSource : type; // 'Pix' ou 'Boleto'
+
         if (expense) {
-          updateExpense({ ...expense, description, amount: parseMoney(amount), date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }), split, type, paymentSource, paidBy });
+          updateExpense({ ...expense, description, amount: parseMoney(amount), date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }), split, type, paymentSource: finalPaymentSource, paidBy });
         } else {
           const n = parseInt(totalInstallments, 10) || 1;
           if (n > 1) {
@@ -803,7 +830,7 @@
               startDate: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
               split,
               type,
-              paymentSource,
+              paymentSource: finalPaymentSource,
               paidBy
             });
           } else {
@@ -813,7 +840,7 @@
               date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
               split,
               type,
-              paymentSource,
+              paymentSource: finalPaymentSource,
               paidBy,
               parcela: null
             });
@@ -834,9 +861,57 @@
               <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label><input type="number" value={totalInstallments} onChange={e => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} /></div>
             </div>
             <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label><input type="date" value={date} onChange={e => setDate(e.target.value)} required className={inputClasses} /></div>
-            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label><select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className={inputClasses}><option>Cartão Guilherme (final 2581)</option><option>Cartão Thais (final 1009)</option><option>Cartão Digital (final 7292)</option></select></div>
+            
+            {type === 'Cartão' ? (
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
+                <select
+                  value={paymentSource}
+                  onChange={e => {
+                    setPaymentSource(e.target.value);
+                    setPaidByLocal(e.target.value.includes('Thais') ? 'Thais' : e.target.value.includes('Guilherme') ? 'Guilherme' : 'Digital');
+                  }}
+                  className={inputClasses}
+                >
+                  <option>Cartão Guilherme (final 2581)</option>
+                  <option>Cartão Thais (final 1009)</option>
+                  <option>Cartão Digital (final 7292)</option>
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago por</label>
+                <select value={paidByLocal} onChange={e => setPaidByLocal(e.target.value)} className={inputClasses}>
+                  <option>Guilherme</option>
+                  <option>Thais</option>
+                </select>
+              </div>
+            )}
+
             <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value="Guilherme">Apenas Guilherme</option><option value="Thais">Apenas Thais</option></select></div>
-            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label><select value={type} onChange={e => setType(e.target.value)} className={inputClasses}><option>Cartão</option><option>Pix</option><option>Boleto</option></select></div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label>
+              <select
+                value={type}
+                onChange={e => {
+                  const newType = e.target.value;
+                  setType(newType);
+                  if (newType !== 'Cartão') {
+                    setPaymentSource('');
+                  } else {
+                    const def = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
+                    setPaymentSource(def);
+                    setPaidByLocal(def.includes('Thais') ? 'Thais' : 'Guilherme');
+                  }
+                }}
+                className={inputClasses}
+              >
+                <option>Cartão</option>
+                <option>Pix</option>
+                <option>Boleto</option>
+              </select>
+            </div>
             <div className="flex justify-end space-x-3 pt-4"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button><button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button></div>
           </form>
         </Modal>
@@ -850,7 +925,7 @@
       );
       const [db, setDb] = useState(null);
       const [auth, setAuth] = useState(null);
-      const [authed, setAuthed] = useState(false);   // <— novo
+      const [authed, setAuthed] = useState(false);
       const [error, setError] = useState(null);
 
       useEffect(() => {
