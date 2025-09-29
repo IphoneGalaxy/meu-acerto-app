@@ -43,7 +43,7 @@
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
   <div id="root"></div>
 
-  <script type="text/babel">
+  <script type="text/babel" data-presets="env,react">
     const { useState, useEffect, useMemo, useRef } = React;
     const { createRoot } = ReactDOM;
 
@@ -72,15 +72,15 @@
     const excelSerialToPT = (v) => {
       if (typeof v === 'number') {
         const ms = Math.round((v - 25569) * 86400 * 1000);
-        return new Date(ms).toLocaleDateString('pt-PT');
+        return new Date(ms).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
       }
       if (typeof v === 'string') {
         if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v; // dd/mm/aaaa
-        if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT'); // yyyy-mm-dd
+        if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT', { timeZone: 'UTC' }); // yyyy-mm-dd
         const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/); // dd/mm/aa
         if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/20${m[3]}`;
       }
-      return new Date().toLocaleDateString('pt-PT');
+      return new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });
     };
 
     const formatBRL = (value) =>
@@ -184,7 +184,7 @@
                     installmentPlanId: plan.id,
                     description: plan.description,
                     amount: num === plan.numberOfInstallments ? lastInstallment : perInstallment,
-                    date: instDate.toLocaleDateString('pt-PT'),
+                    date: instDate.toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
                     parcela: `${num}/${plan.numberOfInstallments}`,
                     split: plan.split,
                     type: plan.type,
@@ -228,13 +228,20 @@
         await expensesColRef.doc(deletingExpenseId).delete();
         setDeletingExpenseId(null);
       };
+      
+      const deleteCollection = async (colRef, chunkSize = 450) => {
+        let snap = await colRef.limit(chunkSize).get();
+        while (!snap.empty) {
+          const batch = db.batch();
+          snap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+          snap = await colRef.limit(chunkSize).get();
+        }
+      };
+
       const confirmAndClearAll = async () => {
-        const expSnap = await expensesColRef.get();
-        const planSnap = await plansColRef.get();
-        const batch = db.batch();
-        expSnap.forEach((d) => batch.delete(d.ref));
-        planSnap.forEach((d) => batch.delete(d.ref));
-        await batch.commit();
+        await deleteCollection(expensesColRef);
+        await deleteCollection(plansColRef);
         setIsClearModalOpen(false);
       };
       
@@ -323,11 +330,7 @@
             pagoPorGeral.tPaid > pagoPorGeral.gPaid ? 'Thais' : 'Empate';
 
           const gBalanceGeral = round2(pagoPorGeral.gPaid - partsGeral.g);
-          const reembolsoGeralValor = round2(Math.abs(gBalanceGeral));
-          const reembolsoGeralQuem =
-            gBalanceGeral > 0 ? 'Thais → Guilherme' :
-            gBalanceGeral < 0 ? 'Guilherme → Thais' : 'Ninguém';
-
+          
           const hoje = new Date();
           const currY = hoje.getFullYear();
           const currM = hoje.getMonth() + 1;
@@ -363,10 +366,9 @@
             pagoPorMes.gPaid > pagoPorMes.tPaid ? 'Guilherme' :
             pagoPorMes.tPaid > pagoPorMes.gPaid ? 'Thais' : 'Empate';
           const gBalanceMes = round2(pagoPorMes.gPaid - partsMes.g);
-          const reembolsoMesValor = round2(Math.abs(gBalanceMes));
-          const reembolsoMesQuem =
-            gBalanceMes > 0 ? 'Thais → Guilherme' :
-            gBalanceMes < 0 ? 'Guilherme → Thais' : 'Ninguém';
+          
+          const reembolsoGeralValorSigned = user === 'Guilherme' ? gBalanceGeral : -gBalanceGeral;
+          const reembolsoMesValorSigned   = user === 'Guilherme' ? gBalanceMes   : -gBalanceMes;
 
           const nextMonthFirst = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
           const nextMonthLast  = new Date(hoje.getFullYear(), hoje.getMonth() + 2, 0);
@@ -456,7 +458,7 @@
             ['Guilherme + Digital', pagoPorGeral.gPaid, ''],
             ['Thais', pagoPorGeral.tPaid, ''],
             ['Diferença (quem pagou mais)', diffGeral, quemPagouMaisGeral],
-            ['Reembolso sugerido (Geral)', reembolsoGeralValor, reembolsoGeralQuem],
+            ['Reembolso (Geral) — sinal p/ você', reembolsoGeralValorSigned, reembolsoGeralValorSigned > 0 ? 'Você tem a receber' : reembolsoGeralValorSigned < 0 ? 'Você deve' : 'Zerado'],
             [],
             ['NO MÊS ATUAL', '', `Referência: ${ymd(new Date(currY, currM-1, 1))}`],
             ['Parte Guilherme (mês)', partsMes.g, ''],
@@ -464,7 +466,7 @@
             ['Pago por Guilherme + Digital (mês)', pagoPorMes.gPaid, ''],
             ['Pago por Thais (mês)', pagoPorMes.tPaid, ''],
             ['Diferença (mês)', diffMes, quemPagouMaisMes],
-            ['Reembolso sugerido (mês)', reembolsoMesValor, reembolsoMesQuem],
+            ['Reembolso (mês) — sinal p/ você',   reembolsoMesValorSigned,   reembolsoMesValorSigned > 0 ? 'Você tem a receber' : reembolsoMesValorSigned < 0 ? 'Você deve' : 'Zerado'],
             [],
             ['PARCELADOS', '', ''],
             ['A liberar no próximo mês', liberarProximoMes, 'Somatória das parcelas que caem no mês que vem'],
@@ -495,7 +497,7 @@
 
           const hojeNome = new Date().toISOString().slice(0, 10);
           const nome = (minDatePT && maxDatePT)
-            ? `meu_acerto_${minDatePT.replaceAll('/','-')}_a_${maxDatePT.replaceAll('/','-')}.xlsx`
+            ? `meu_acerto_${minDatePT.split('/').join('-')}_a_${maxDatePT.split('/').join('-')}.xlsx`
             : `meu_acerto_${hojeNome}.xlsx`;
           XLSX.writeFile(wb, nome);
 
@@ -604,12 +606,13 @@
                 if (descLow.includes('inclusao de pagamento') || descLow.includes('inclusão de pagamento')) {
                   return null;
                 }
-
+                
                 const finalCartaoStr = idx.finalCartao >= 0 ? String(row[idx.finalCartao] || '').trim() : '';
-                let owner, source;
-                if (finalCartaoStr.endsWith('2581')) { owner = 'Guilherme'; source = 'Cartão Guilherme (final 2581)'; }
-                else if (finalCartaoStr.endsWith('1009')) { owner = 'Thais'; source = 'Cartão Thais (final 1009)'; }
-                else { owner = 'Digital'; source = 'Cartão Digital (final 7292)'; }
+                
+                const source =
+                  finalCartaoStr.endsWith('2581') ? 'Cartão Guilherme (final 2581)' :
+                  finalCartaoStr.endsWith('1009') ? 'Cartão Thais (final 1009)' :
+                                                     'Cartão Digital (final 7292)';
 
                 const amount = parseMoney(rawValor);
                 if (!Number.isFinite(amount)) return null;
@@ -629,8 +632,8 @@
                   amount,
                   date: dataCompra,
                   split: 'Dividido',
-                  paidBy: owner,
-                  paymentSource: source,
+                  paidBy: 'Guilherme',   // <- você paga a fatura inteira
+                  paymentSource: source,    // de qual cartão veio
                   type: 'Cartão',
                   parcela: parcelaInfo
                 };
@@ -655,22 +658,27 @@
       const confirmImport = async () => {
         if (isImporting) return;
         setIsImporting(true);
-        const uniqueImportedExpenses = importedExpenses.filter((imp) =>
-          !expenses.some(
-            (ex) =>
+        try {
+          const uniqueImportedExpenses = importedExpenses.filter(imp =>
+            !expenses.some(ex =>
               ex.description === imp.description &&
               Math.abs(ex.amount - imp.amount) < 0.01 &&
               ex.date === imp.date &&
               ex.parcela === imp.parcela &&
               ex.paymentSource === imp.paymentSource
-          )
-        );
-        const batch = db.batch();
-        uniqueImportedExpenses.forEach((e) => batch.set(expensesColRef.doc(), e));
-        await batch.commit();
-        setImportedExpenses([]);
-        setImportModalOpen(false);
-        setIsImporting(false);
+            )
+          );
+          const batch = db.batch();
+          uniqueImportedExpenses.forEach(e => batch.set(expensesColRef.doc(), e));
+          await batch.commit();
+          setImportedExpenses([]);
+          setImportModalOpen(false);
+        } catch (e) {
+          console.error(e);
+          alert('Falha ao importar.');
+        } finally {
+          setIsImporting(false);
+        }
       };
 
       const filteredAndSortedExpenses = useMemo(() => {
@@ -765,31 +773,33 @@
       
       const gBalance = round2(gPaid - parts.g);
 
-      const { reembolsoLabel, reembolsoValor, reembolsoCor } = useMemo(() => {
-        if (Math.abs(gBalance) < 0.01) {
-          return {
-            reembolsoLabel: 'Contas em dia!',
-            reembolsoValor: 0,
-            reembolsoCor: 'text-emerald-500'
-          };
-        }
-        if (gBalance > 0) { // Guilherme paid more, Thais owes him
-          return {
-            reembolsoLabel: user === 'Guilherme' ? 'Thais deve reembolsar você' : 'Você deve reembolsar Guilherme',
-            reembolsoValor: gBalance,
-            reembolsoCor: user === 'Guilherme' ? 'text-emerald-500' : 'text-amber-400'
-          };
-        } else { // Guilherme paid less, he owes Thais
-          return {
-            reembolsoLabel: user === 'Guilherme' ? 'Você deve reembolsar Thais' : 'Thais deve reembolsar você',
-            reembolsoValor: Math.abs(gBalance),
-            reembolsoCor: user === 'Guilherme' ? 'text-amber-400' : 'text-emerald-500'
-          };
-        }
-      }, [gBalance, user]);
+      // saldo do ponto de vista de QUEM ESTÁ LOGADO
+      // gBalance > 0  => Guilherme pagou além da parte dele (Thais deve a ele)
+      const saldoUsuario = user === 'Guilherme' ? gBalance : -gBalance;
+      const reembolsoValorSigned = round2(saldoUsuario);
 
-      const diffValor = round2(Math.abs(gPaid - tPaid));
-      const diffQuem = gPaid > tPaid ? 'Guilherme' : (tPaid > gPaid ? 'Thais' : null);
+      const { reembolsoLabel, reembolsoCor } = (() => {
+        if (Math.abs(reembolsoValorSigned) < 0.01) {
+          return { reembolsoLabel: 'Contas em dia!', reembolsoCor: 'text-emerald-500' };
+        }
+        const outro = user === 'Guilherme' ? 'Thais' : 'Guilherme';
+        return reembolsoValorSigned > 0
+          ? { reembolsoLabel: `Você tem a receber de ${outro}`, reembolsoCor: 'text-emerald-500' }
+          : { reembolsoLabel: `Você deve para ${outro}`,       reembolsoCor: 'text-amber-500' };
+      })();
+      
+      const diffRaw = round2(gPaid - tPaid); // >0 => Guilherme pagou mais
+      const diffAbs = Math.abs(diffRaw);
+
+      const diffTexto = (() => {
+        if (diffAbs < 0.01) return 'Empate';
+        if (user === 'Guilherme') {
+          return diffRaw > 0 ? 'Você pagou a mais' : 'Thais pagou a mais do que você';
+        } else {
+          return diffRaw > 0 ? 'Guilherme pagou a mais do que você' : 'Você pagou a mais';
+        }
+      })();
+
       const myPart    = round2(user === 'Guilherme' ? parts.g : parts.t);
       const otherPart = round2(user === 'Guilherme' ? parts.t : parts.g);
       
@@ -872,7 +882,7 @@
                 {reembolsoLabel}
               </p>
               <p className={`${reembolsoCor} text-3xl sm:text-4xl font-extrabold`}>
-                {formatBRL(reembolsoValor)}
+                {formatBRL(reembolsoValorSigned)}
               </p>
               <div className="mt-4">
                 <button
@@ -886,9 +896,9 @@
               <hr className="my-4 border-slate-200 dark:border-slate-700" />
               <div>
                 <h4 className="font-semibold mb-1 text-slate-600 dark:text-slate-400">Diferença nos gastos</h4>
-                <p className="text-sky-400 text-2xl font-bold">{formatBRL(diffValor)}</p>
+                <p className="text-sky-400 text-2xl font-bold">{formatBRL(diffAbs)}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {diffQuem ? `${diffQuem} pagou a mais` : 'Empate'}
+                  {diffTexto}
                 </p>
               </div>
             </div>
@@ -1050,9 +1060,7 @@
       const handleSubmit = (e) => {
         e.preventDefault();
         const isCard = type === 'Cartão';
-        const paidBy = isCard
-          ? (paymentSource.includes('Thais') ? 'Thais' : paymentSource.includes('Guilherme') ? 'Guilherme' : 'Digital')
-          : paidByLocal;
+        const paidBy = isCard ? 'Guilherme' : paidByLocal;
         const finalPaymentSource = isCard ? paymentSource : type; // 'Pix' ou 'Boleto'
 
         if (expense) {
@@ -1104,10 +1112,7 @@
                 <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
                 <select
                   value={paymentSource}
-                  onChange={e => {
-                    setPaymentSource(e.target.value);
-                    setPaidByLocal(e.target.value.includes('Thais') ? 'Thais' : e.target.value.includes('Guilherme') ? 'Guilherme' : 'Digital');
-                  }}
+                  onChange={e => setPaymentSource(e.target.value)}
                   className={inputClasses}
                 >
                   <option>Cartão Guilherme (final 2581)</option>
@@ -1139,7 +1144,7 @@
                   } else {
                     const def = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
                     setPaymentSource(def);
-                    setPaidByLocal(def.includes('Thais') ? 'Thais' : 'Guilherme');
+                    setPaidByLocal('Guilherme');
                   }
                 }}
                 className={inputClasses}

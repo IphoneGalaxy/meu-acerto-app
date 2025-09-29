@@ -1,8 +1,12 @@
 {
+  "id": "/meu-acerto-app/",
   "name": "Meu Acerto",
   "short_name": "Acerto",
+  "lang": "pt-PT",
+  "dir": "ltr",
   "description": "Um aplicativo para gerenciar e dividir despesas entre duas pessoas.",
   "start_url": "/meu-acerto-app/",
+  "scope": "/meu-acerto-app/",
   "display": "standalone",
   "background_color": "#f1f5f9",
   "theme_color": "#4338ca",
