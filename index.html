@@ -13,15 +13,13 @@
   <meta name="theme-color" content="#4338ca" />
   <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
 
-  <!-- UI libs -->
+  <!-- UI -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <!-- React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-  <!-- Babel (JSX no browser) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- SheetJS -->
@@ -34,10 +32,8 @@
 
   <style>
     body { font-family: 'Inter', sans-serif; }
-    .modal-enter { animation: fadeIn 0.3s ease-out; }
-    .modal-leave { animation: fadeOut 0.3s ease-in; }
-    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-    @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.95); } }
+    .modal-enter { animation: fadeIn .2s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(.98);} to { opacity: 1; transform: scale(1);} }
   </style>
 </head>
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
@@ -47,51 +43,71 @@
     const { useState, useEffect, useMemo, useRef } = React;
     const { createRoot } = ReactDOM;
 
-    // ================== Helpers ==================
-    const norm = (s) =>
-      (s ?? '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-
-    // Conversor de dinheiro robusto e corrigido
+    /* ================= Helpers ================= */
+    const norm = (s) => (s ?? '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+    const canonicalSplit = (s) => {
+      const n = norm(s);
+      if (n.includes('guilherme')) return 'Guilherme';
+      if (n.includes('thais')) return 'Thais';
+      return 'Dividido';
+    };
     const parseMoney = (input) => {
       if (typeof input === 'number') return input;
-      if (input == null || typeof input !== 'string') return NaN;
-
-      const s = input.replace(/R\$\s?/gi, '').trim();
-
-      if (/^-?\d+\.\d{2}$/.test(s) && !s.includes(',')) {
-        const n = parseFloat(s);
-        return Number.isFinite(n) ? n : NaN;
-      }
-
-      const finalString = s.replace(/\./g, '').replace(',', '.');
-      const n = parseFloat(finalString);
+      if (!input) return NaN;
+      const s = String(input).replace(/R\$\s?/gi,'').trim();
+      if (/^-?\d+\.\d{2}$/.test(s) && !s.includes(',')) return Number(s);
+      const n = parseFloat(s.replace(/\./g,'').replace(',','.'));
       return Number.isFinite(n) ? n : NaN;
     };
-
-    // Serial Excel ou string -> dd/mm/aaaa
     const excelSerialToPT = (v) => {
       if (typeof v === 'number') {
         const ms = Math.round((v - 25569) * 86400 * 1000);
         return new Date(ms).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
       }
       if (typeof v === 'string') {
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v; // dd/mm/aaaa
-        if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT', { timeZone: 'UTC' }); // yyyy-mm-dd
-        const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/); // dd/mm/aa
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;
+        if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+        const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);
         if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/20${m[3]}`;
       }
       return new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });
     };
+    const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL'}).format(v || 0);
+    const round2 = (v) => Math.round((v + Number.EPSILON)*100)/100;
 
-    const formatBRL = (value) =>
-      new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'BRL' }).format(value || 0);
+    /* ================= UI Genéricos ================= */
+    const Modal = ({ isOpen, onClose, children, titleId='modal-title' }) => {
+      const contentRef = React.useRef(null);
+      React.useEffect(() => {
+        if (!isOpen) return;
+        // focar uma vez o primeiro campo do modal
+        setTimeout(() => {
+          const node = contentRef.current;
+          const focusables = node?.querySelectorAll('input,select,textarea,button,[tabindex]:not([tabindex="-1"])');
+          (focusables?.[0] || node)?.focus();
+        }, 0);
 
-    // ================== UI Genéricos ==================
-    const Modal = ({ isOpen, onClose, children }) => {
+        const onKeyDown = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); onClose?.(); }
+          if (e.key === 'Tab') {
+            const node = contentRef.current;
+            const focusables = node?.querySelectorAll('input,select,textarea,button,[tabindex]:not([tabindex="-1"])');
+            if (!focusables || !focusables.length) return;
+            const first = focusables[0], last = focusables[focusables.length-1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+      }, [isOpen]); // não depende de onClose p/ não recriar em cada digitação
+
       if (!isOpen) return null;
       return (
-        <div className="fixed inset-0 bg-black/60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md m-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center p-4 z-50 modal-enter" onClick={onClose} aria-hidden="true">
+          <div role="dialog" aria-modal="true" aria-labelledby={titleId}
+               className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md m-4 outline-none"
+               onClick={(e)=>e.stopPropagation()} ref={contentRef} tabIndex={-1}>
             {children}
           </div>
         </div>
@@ -101,17 +117,15 @@
     const UserSelectionScreen = ({ onSelectUser }) => {
       const users = ['Guilherme', 'Thais'];
       return (
-        <div className="min-h-screen flex flex-col justify-center items-center p-4">
+        <div className="min-h-screen flex flex-col justify-center items-center p-6">
           <h1 className="text-4xl font-bold mb-2">Meu Acerto</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
-          <div className="space-y-4 w-full max-w-xs flex flex-col items-center">
-            {users.map((user) => (
-              <button
-                key={user}
-                onClick={() => onSelectUser(user)}
-                className={`w-full text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition-transform hover:scale-105 ${user === 'Thais' ? 'bg-pink-600 hover:bg-pink-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-              >
-                {user}
+          <div className="space-y-4 w-full max-w-xs">
+            {users.map(u => (
+              <button key={u} onClick={()=>onSelectUser(u)}
+                className={`w-full py-3 rounded-xl text-white font-semibold shadow-lg hover:brightness-110 transition
+                 ${u==='Thais' ? 'bg-pink-600' : 'bg-indigo-600'}`}>
+                {u}
               </button>
             ))}
           </div>
@@ -119,117 +133,111 @@
       );
     };
 
-    // ================== Dashboard ==================
+    /* ================= Dashboard ================= */
     const Dashboard = ({ user, onLogout, db }) => {
+      // estado
       const [expenses, setExpenses] = useState([]);
       const [installmentPlans, setInstallmentPlans] = useState([]);
-      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [filter, setFilter] = useState('Todos');
+      const [scope, setScope] = useState('geral');
+      const [isAddOpen, setIsAddOpen] = useState(false);
       const [isImportModalOpen, setImportModalOpen] = useState(false);
       const [isImporting, setIsImporting] = useState(false);
       const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-      const [deletingExpenseId, setDeletingExpenseId] = useState(null);
-      const [editingExpense, setEditingExpense] = useState(null);
       const [importedExpenses, setImportedExpenses] = useState([]);
-      const [filter, setFilter] = useState('Todos');
-      const [scope, setScope] = useState('geral');
       const fileInputRef = useRef(null);
-      
-      // arredondar em 2 casas para evitar ruído de ponto flutuante
-      const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+
+      // form adicionar
+      const [fDesc, setFDesc] = useState('');
+      const [fValor, setFValor] = useState('');
+      const [fData, setFData] = useState(() => new Date().toLocaleDateString('pt-PT', { timeZone:'UTC'}));
+      const [fTipo, setFTipo] = useState('Cartão');
+      const [fSplit, setFSplit] = useState('Dividido');
+      const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
+      const [salvando, setSalvando] = useState(false);
 
       const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
-      const themes = {
-        Guilherme: { text: 'text-indigo-600', darkText: 'dark:text-indigo-400', bg: 'bg-indigo-600', hoverBg: 'hover:bg-indigo-700', ring: 'focus:ring-indigo-500', border: 'focus:border-indigo-500', borderClass: 'border-indigo-500' },
-        Thais: { text: 'text-pink-600', darkText: 'dark:text-pink-400', bg: 'bg-pink-600', hoverBg: 'hover:bg-pink-700', ring: 'focus:ring-pink-500', border: 'focus:border-pink-500', borderClass: 'border-pink-500' }
-      };
-      const theme = themes[user] || themes.Guilherme;
+      const theme = user === 'Thais'
+        ? { text:'text-pink-600', darkText:'dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700', border:'border-pink-500' }
+        : { text:'text-indigo-600', darkText:'dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700', border:'border-indigo-500' };
 
+      // refs firestore
       const expensesColRef = useMemo(() => db.collection('expenses'), [db]);
-      const plansColRef = useMemo(() => db.collection('installmentPlans'), [db]);
+      const plansColRef    = useMemo(() => db.collection('installmentPlans'), [db]);
 
+      // streams
       useEffect(() => {
-        if (!db) return;
-        const unsub1 = expensesColRef.onSnapshot((snap) =>
-          setExpenses(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
-        );
-        const unsub2 = plansColRef.onSnapshot((snap) =>
-          setInstallmentPlans(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
-        );
+        const unsub1 = expensesColRef.onSnapshot(s => setExpenses(s.docs.map(d => ({ id:d.id, ...d.data()}))));
+        const unsub2 = plansColRef.onSnapshot(s => setInstallmentPlans(s.docs.map(d => ({ id:d.id, ...d.data()}))));
         return () => { unsub1(); unsub2(); };
-      }, [db, expensesColRef, plansColRef]);
+      }, [expensesColRef, plansColRef]);
 
-      // Geração automática de parcelas passadas faltantes
+      // gerar parcelas atrasadas (se existir plano)
       useEffect(() => {
-        if (!db || installmentPlans.length === 0) return;
-        const generateMissingInstallments = async () => {
-          const today = new Date();
-          const batch = db.batch();
-          let hasWrites = false;
+        if (installmentPlans.length === 0) return;
+        const today = new Date();
+        const batch = db.batch();
+        let hasWrites = false;
 
-          for (const plan of installmentPlans) {
-            const [day, month, year] = plan.startDate.split('/');
-            const startDate = new Date(year, month - 1, day);
-            const perInstallment = round2(plan.totalAmount / plan.numberOfInstallments);
-            const lastInstallment = round2(plan.totalAmount - perInstallment * (plan.numberOfInstallments - 1));
+        for (const plan of installmentPlans) {
+          if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
 
-            for (let i = 0; i < plan.numberOfInstallments; i++) {
-              const instDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
-              if (instDate <= today) {
-                const num = i + 1;
-                const exists = expenses.some(
-                  (e) => e.installmentPlanId === plan.id && e.parcela === `${num}/${plan.numberOfInstallments}`
-                );
-                if (!exists) {
-                  const newExpense = {
-                    installmentPlanId: plan.id,
-                    description: plan.description,
-                    amount: num === plan.numberOfInstallments ? lastInstallment : perInstallment,
-                    date: instDate.toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
-                    parcela: `${num}/${plan.numberOfInstallments}`,
-                    split: plan.split,
-                    type: plan.type,
-                    paymentSource: plan.paymentSource,
-                    paidBy: plan.paidBy
-                  };
-                  batch.set(expensesColRef.doc(), newExpense);
-                  hasWrites = true;
-                }
+          const [dd, mm, yyyy] = String(plan.startDate).split('/');
+          const start = new Date(yyyy, mm-1, dd);
+          const per = round2(plan.totalAmount / plan.numberOfInstallments);
+          const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1));
+
+          for (let i=0;i<plan.numberOfInstallments;i++) {
+            const d = new Date(start.getFullYear(), start.getMonth()+i, start.getDate(), 12);
+            if (d <= today) {
+              const num = i+1;
+              const exists = expenses.some(e => e.installmentPlanId===plan.id && e.parcela===`${num}/${plan.numberOfInstallments}`);
+              if (!exists) {
+                batch.set(expensesColRef.doc(), {
+                  installmentPlanId: plan.id,
+                  description: plan.description,
+                  amount: num === plan.numberOfInstallments ? last : per,
+                  date: d.toLocaleDateString('pt-PT', { timeZone:'UTC'}),
+                  parcela: `${num}/${plan.numberOfInstallments}`,
+                  split: plan.split,
+                  type: plan.type,
+                  paymentSource: plan.paymentSource,
+                  paidBy: 'Cartão'
+                });
+                hasWrites = true;
               }
             }
           }
-          if (hasWrites) await batch.commit();
-        };
-        generateMissingInstallments();
-      }, [installmentPlans, expenses, db]);
+        }
+        if (hasWrites) batch.commit();
+      }, [installmentPlans, expenses, db, expensesColRef]);
 
-      const openAddModal = () => { setEditingExpense(null); setIsModalOpen(true); };
-      const openEditModal = (expense) => { setEditingExpense(expense); setIsModalOpen(true); };
+      /* ===== ações ===== */
+      const salvarLancamento = async () => {
+        const val = parseMoney(fValor);
+        if (!fDesc || !Number.isFinite(val)) { alert('Informe descrição e valor válido.'); return; }
+        setSalvando(true);
+        try {
+          await expensesColRef.add({
+            description: fDesc,
+            amount: val,
+            date: fData,
+            split: fSplit,
+            type: fTipo,
+            paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,
+            paidBy: fTipo === 'Cartão' ? 'Cartão' : user,
+            parcela: null
+          });
+          setIsAddOpen(false);
+          setFDesc(''); setFValor('');
+        } catch (e) {
+          console.error(e); alert('Falha ao salvar.');
+        } finally {
+          setSalvando(false);
+        }
+      };
 
-      const addSingleExpense = async (expense) => { await expensesColRef.add(expense); };
-      const addInstallmentPlan = async (plan) => {
-        const planDocRef = await plansColRef.add(plan);
-        const perInstallment = round2(plan.totalAmount / plan.numberOfInstallments);
-        const first = {
-          installmentPlanId: planDocRef.id,
-          description: plan.description,
-          amount: perInstallment,
-          date: plan.startDate,
-          parcela: `1/${plan.numberOfInstallments}`,
-          split: plan.split,
-          type: plan.type,
-          paymentSource: plan.paymentSource,
-          paidBy: plan.paidBy
-        };
-        await expensesColRef.add(first);
-      };
-      const updateExpense = async ({ id, ...data }) => { await expensesColRef.doc(id).update(data); };
-      const confirmAndDeleteExpense = async () => {
-        if (!deletingExpenseId) return;
-        await expensesColRef.doc(deletingExpenseId).delete();
-        setDeletingExpenseId(null);
-      };
-      
-      const deleteCollection = async (colRef, chunkSize = 450) => {
+      const deleteCollection = async (colRef, chunkSize=450) => {
         let snap = await colRef.limit(chunkSize).get();
         while (!snap.empty) {
           const batch = db.batch();
@@ -238,420 +246,141 @@
           snap = await colRef.limit(chunkSize).get();
         }
       };
-
       const confirmAndClearAll = async () => {
         await deleteCollection(expensesColRef);
         await deleteCollection(plansColRef);
         setIsClearModalOpen(false);
       };
-      
-      // --- EXPORTAR XLSX (com cartão importável, detalhado, pix/boletos e resumo) ---
-      const exportXLSX = () => {
+
+      const exportXLSX = async () => {
         try {
-          if (!expenses || expenses.length === 0) {
-            alert('Não há lançamentos para exportar.');
-            return;
-          }
-
-          const toPT = (d) => {
-            if (!d) return '';
-            if (typeof d === 'string' && d.includes('/')) return d; // dd/mm/aaaa
-            return new Date(d).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
-          };
-          const parsePTDate = (pt) => {
-            const [dd, mm, yyyy] = String(pt).split('/').map(Number);
-            return new Date(yyyy, (mm || 1) - 1, dd || 1);
-          };
-          const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-          const last4 = (src = '', paidBy = '') => {
-            const s = String(src || '');
-            if (s.includes('2581')) return '2581';
-            if (s.includes('1009')) return '1009';
-            if (s.includes('7292')) return '7292';
-            if (paidBy === 'Digital') return '7292';
-            if (paidBy === 'Guilherme') return '2581';
-            if (paidBy === 'Thais') return '1009';
-            return '';
-          };
-          const exclusivoDe = (splitVal) => {
-            const v = (splitVal || '').toString();
-            if (v === 'Guilherme' || v === 'Apenas Guilherme') return 'Guilherme';
-            if (v === 'Thais' || v === 'Apenas Thais') return 'Thais';
-            return 'Dividido';
-          };
-          const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-
-          const clean = expenses.filter((e) => e.type !== 'Ajuste');
-
-          const dates = clean.map((e) => parsePTDate(e.date).getTime());
-          const minDatePT = dates.length ? toPT(new Date(Math.min(...dates))) : '';
-          const maxDatePT = dates.length ? toPT(new Date(Math.max(...dates))) : '';
-
-          const soCartao = clean.filter((e) => e.type === 'Cartão');
-
-          const sumByNeedle = (needle) =>
-            round2(
-              soCartao
-                .filter((e) => (e.paymentSource || '').includes(needle))
-                .reduce((s, e) => s + Number(e.amount || 0), 0)
-            );
-          const total2581 = sumByNeedle('2581');
-          const total1009 = sumByNeedle('1009');
-          const total7292 = sumByNeedle('7292');
-          const totalFaturas = round2(total2581 + total1009 + total7292);
-
-          const partsGeral = (() => {
-            let g = 0, t = 0;
-            for (const e of clean) {
-              const v = Number(e.amount || 0);
-              const splitVal = (e.split || '').toString();
-              if (splitVal === 'Dividido' || !splitVal) { g += v/2; t += v/2; }
-              else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += v;
-              else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += v;
-              else { g += v/2; t += v/2; }
-            }
-            return { g: round2(g), t: round2(t) };
-          })();
-
-          const pagoPorGeral = (() => {
-            let gPaid = 0, tPaid = 0;
-            for (const e of clean) {
-              const v = Number(e.amount || 0);
-              const p = e.paidBy || 'Guilherme';
-              if (p === 'Guilherme' || p === 'Digital') gPaid += v;
-              else if (p === 'Thais') tPaid += v;
-            }
-            return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
-          })();
-
-          const diffGeral = round2(Math.abs(pagoPorGeral.gPaid - pagoPorGeral.tPaid));
-          const quemPagouMaisGeral =
-            pagoPorGeral.gPaid > pagoPorGeral.tPaid ? 'Guilherme' :
-            pagoPorGeral.tPaid > pagoPorGeral.gPaid ? 'Thais' : 'Empate';
-
-          const gBalanceGeral = round2(pagoPorGeral.gPaid - partsGeral.g);
-          
-          const hoje = new Date();
-          const currY = hoje.getFullYear();
-          const currM = hoje.getMonth() + 1;
-          const inMesAtual = clean.filter((e) => {
-            const [dd, mm, yy] = String(e.date).split('/').map(Number);
-            return yy === currY && mm === currM;
-          });
-
-          const partsMes = (() => {
-            let g = 0, t = 0;
-            for (const e of inMesAtual) {
-              const v = Number(e.amount || 0);
-              const splitVal = (e.split || '').toString();
-              if (splitVal === 'Dividido' || !splitVal) { g += v/2; t += v/2; }
-              else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += v;
-              else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += v;
-              else { g += v/2; t += v/2; }
-            }
-            return { g: round2(g), t: round2(t) };
-          })();
-          const pagoPorMes = (() => {
-            let gPaid = 0, tPaid = 0;
-            for (const e of inMesAtual) {
-              const v = Number(e.amount || 0);
-              const p = e.paidBy || 'Guilherme';
-              if (p === 'Guilherme' || p === 'Digital') gPaid += v;
-              else if (p === 'Thais') tPaid += v;
-            }
-            return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
-          })();
-          const diffMes = round2(Math.abs(pagoPorMes.gPaid - pagoPorMes.tPaid));
-          const quemPagouMaisMes =
-            pagoPorMes.gPaid > pagoPorMes.tPaid ? 'Guilherme' :
-            pagoPorMes.tPaid > pagoPorMes.gPaid ? 'Thais' : 'Empate';
-          const gBalanceMes = round2(pagoPorMes.gPaid - partsMes.g);
-          
-          const reembolsoGeralValorSigned = user === 'Guilherme' ? gBalanceGeral : -gBalanceGeral;
-          const reembolsoMesValorSigned   = user === 'Guilherme' ? gBalanceMes   : -gBalanceMes;
-
-          const nextMonthFirst = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
-          const nextMonthLast  = new Date(hoje.getFullYear(), hoje.getMonth() + 2, 0);
-
-          let liberarProximoMes = 0;
-          let restanteTotal = 0;
-
-          for (const plan of (installmentPlans || [])) {
-            if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
-
-            const [d, m, y] = String(plan.startDate).split('/').map(Number);
-            const start = new Date(y, (m || 1) - 1, d || 1);
-            const per = round2(Number(plan.totalAmount) / Number(plan.numberOfInstallments));
-            const last = round2(Number(plan.totalAmount) - per * (Number(plan.numberOfInstallments) - 1));
-
-            for (let i = 0; i < Number(plan.numberOfInstallments); i++) {
-              const dt = new Date(start.getFullYear(), start.getMonth() + i, start.getDate());
-              const amt = (i === Number(plan.numberOfInstallments) - 1) ? last : per;
-
-              if (dt > hoje) restanteTotal += amt;
-              if (dt >= nextMonthFirst && dt <= nextMonthLast) liberarProximoMes += amt;
-            }
-          }
-          liberarProximoMes = round2(liberarProximoMes);
-          restanteTotal = round2(restanteTotal);
-
-          // ----- Sheet 1: Cartão (importável) -----
-          const cartaoHeader = ['Data de compra', 'Final do cartão', 'Descrição', 'Parcela', 'Valor (R$)'];
-          const cartaoRows = soCartao
-            .slice()
-            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
-            .map((e) => [
-              toPT(e.date),
-              last4(e.paymentSource, e.paidBy),
-              e.description || '',
-              e.parcela || 'Única',
-              round2(e.amount),
-            ]);
-
-          // ----- Sheet 2: Cartão (detalhado) -----
-          const cartaoDetHeader = ['Data de compra', 'Final do cartão', 'Descrição', 'Parcela', 'Valor (R$)', 'Divisão', 'Pago por', 'Exclusivo'];
-          const cartaoDetRows = soCartao
-            .slice()
-            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
-            .map((e) => [
-              toPT(e.date),
-              last4(e.paymentSource, e.paidBy),
-              e.description || '',
-              e.parcela || 'Única',
-              round2(e.amount),
-              e.split || 'Dividido',
-              e.paidBy || '',
-              exclusivoDe(e.split),
-            ]);
-
-          // ----- Sheet 3: Pix e Boletos -----
-          const pbHeader = ['Data', 'Tipo', 'Descrição', 'Divisão', 'Pago por', 'Valor (R$)'];
-          const pbRows = clean
-            .filter((e) => e.type === 'Pix' || e.type === 'Boleto')
-            .slice()
-            .sort((a, b) => parsePTDate(a.date) - parsePTDate(b.date))
-            .map((e) => [
-              toPT(e.date),
-              e.type,
-              e.description || '',
-              e.split || 'Dividido',
-              e.paidBy || '',
-              round2(e.amount),
-            ]);
-
-          // ----- Sheet 4: Resumo -----
-          const resumoHeader = ['Item', 'Valor', 'Obs.'];
-          const resumoRows = [
-            ['Período dos dados', `${minDatePT} até ${maxDatePT}`, ''],
-            [],
-            ['Totais de fatura (Cartões)', '', ''],
-            ['Cartão Guilherme (2581)', total2581, ''],
-            ['Cartão Thais (1009)', total1009, ''],
-            ['Cartão Digital (7292)', total7292, ''],
-            ['Total Geral Cartões', totalFaturas, ''],
-            [],
-            ['Partes (Geral)', '', ''],
-            ['Parte Guilherme', partsGeral.g, 'Somatório pela divisão de cada lançamento'],
-            ['Parte Thais', partsGeral.t, ''],
-            [],
-            ['Pago por (Geral)', '', ''],
-            ['Guilherme + Digital', pagoPorGeral.gPaid, ''],
-            ['Thais', pagoPorGeral.tPaid, ''],
-            ['Diferença (quem pagou mais)', diffGeral, quemPagouMaisGeral],
-            ['Reembolso (Geral) — sinal p/ você', reembolsoGeralValorSigned, reembolsoGeralValorSigned > 0 ? 'Você tem a receber' : reembolsoGeralValorSigned < 0 ? 'Você deve' : 'Zerado'],
-            [],
-            ['NO MÊS ATUAL', '', `Referência: ${ymd(new Date(currY, currM-1, 1))}`],
-            ['Parte Guilherme (mês)', partsMes.g, ''],
-            ['Parte Thais (mês)', partsMes.t, ''],
-            ['Pago por Guilherme + Digital (mês)', pagoPorMes.gPaid, ''],
-            ['Pago por Thais (mês)', pagoPorMes.tPaid, ''],
-            ['Diferença (mês)', diffMes, quemPagouMaisMes],
-            ['Reembolso (mês) — sinal p/ você',   reembolsoMesValorSigned,   reembolsoMesValorSigned > 0 ? 'Você tem a receber' : reembolsoMesValorSigned < 0 ? 'Você deve' : 'Zerado'],
-            [],
-            ['PARCELADOS', '', ''],
-            ['A liberar no próximo mês', liberarProximoMes, 'Somatória das parcelas que caem no mês que vem'],
-            ['Restante total de parcelados', restanteTotal, 'Tudo que ainda vai cair (a partir de hoje)'],
-          ];
-
           const wb = XLSX.utils.book_new();
 
-          const ws1 = XLSX.utils.aoa_to_sheet([cartaoHeader, ...cartaoRows]);
-          ws1['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 48 }, { wch: 12 }, { wch: 12 }];
-          ws1['!autofilter'] = { ref: 'A1:E' + (cartaoRows.length + 1) };
-          XLSX.utils.book_append_sheet(wb, ws1, 'Cartão (importável)');
+          // sheet lançamentos
+          const rows = expenses.map(e => ({
+            ID: e.id||'', Data: e.date||'', Descrição: e.description||'',
+            Valor: Number(e.amount||0), Tipo: e.type||'', Divisão: e.split||'',
+            Origem: e.paymentSource||'', 'Pago por': e.paidBy||'', Parcela: e.parcela||'',
+          }));
+          const ws1 = XLSX.utils.json_to_sheet(rows, { header: Object.keys(rows[0] || {'Sem lançamentos':''}) });
+          const r1 = XLSX.utils.decode_range(ws1['!ref'] || 'A1:A1');
+          for (let R=1; R<=r1.e.r; R++) {
+            const addr = XLSX.utils.encode_cell({r:R, c:3});
+            if (ws1[addr] && typeof ws1[addr].v === 'number') { ws1[addr].t='n'; ws1[addr].z = 'R$ #,##0.00'; }
+          }
+          XLSX.utils.book_append_sheet(wb, ws1, 'Lancamentos');
 
-          const ws2 = XLSX.utils.aoa_to_sheet([cartaoDetHeader, ...cartaoDetRows]);
-          ws2['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 48 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
-          ws2['!autofilter'] = { ref: 'A1:H' + (cartaoDetRows.length + 1) };
-          XLSX.utils.book_append_sheet(wb, ws2, 'Cartão (detalhado)');
+          // resumo (usa memos mais abaixo)
+          const resumo = [
+            ['Usuário', user],
+            ['Escopo exibido', scope],
+            ['Minha parte (escopo)', minhaParteFatura],
+            ['Parte do outro (escopo)', parteDoOutroFatura],
+            ['Dif. de gastos (escopo)', difGastos],
+            ['Se eu quitar tudo (escopo), recebo de '+otherUser, valorDevolverSePagarTudo],
+            [],
+            ['Cartões - Total (geral)', cardTotals.grandTotal],
+            ['Cartão Guilherme 2581', cardTotals.guilhermeCardTotal],
+            ['Cartão Thais 1009', cardTotals.thaisCardTotal],
+            ['Cartão Digital 7292', cardTotals.digitalCardTotal],
+            [],
+            ['Pagamentos feitos por Guilherme (Pix/Boleto/Ajuste)', gPaid],
+            ['Pagamentos feitos por Thais (Pix/Boleto/Ajuste)', tPaid],
+            ['Saldo real para '+user, saldoUsuario],
+          ];
+          const ws2 = XLSX.utils.aoa_to_sheet(resumo);
+          [3,4,5,6,8,9,10,11,13,14,15].forEach(r => {
+            const addr = `B${r}`; if (ws2[addr]) { ws2[addr].t='n'; ws2[addr].z='R$ #,##0.00'; }
+          });
+          XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
 
-          const ws3 = XLSX.utils.aoa_to_sheet([pbHeader, ...pbRows]);
-          ws3['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 48 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
-          ws3['!autofilter'] = { ref: 'A1:F' + (pbRows.length + 1) };
-          XLSX.utils.book_append_sheet(wb, ws3, 'Pix e Boletos');
+          const filename = `meu-acerto-${user.toLowerCase()}-${new Date().toISOString().slice(0,10)}.xlsx`;
+          const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+          const blob = new Blob([wbout], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
-          const ws4 = XLSX.utils.aoa_to_sheet([resumoHeader, ...resumoRows]);
-          ws4['!cols'] = [{ wch: 34 }, { wch: 18 }, { wch: 40 }];
-          ws4['!autofilter'] = { ref: 'A1:C' + (resumoRows.length + 1) };
-          XLSX.utils.book_append_sheet(wb, ws4, 'Resumo');
-
-          const hojeNome = new Date().toISOString().slice(0, 10);
-          const nome = (minDatePT && maxDatePT)
-            ? `meu_acerto_${minDatePT.split('/').join('-')}_a_${maxDatePT.split('/').join('-')}.xlsx`
-            : `meu_acerto_${hojeNome}.xlsx`;
-          XLSX.writeFile(wb, nome);
-
+          if (navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:blob.type})] })) {
+            const file = new File([blob], filename, { type: blob.type });
+            await navigator.share({ files:[file], title:'Relatório Meu Acerto' });
+          } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+          }
         } catch (err) {
-          console.error('Falha ao exportar XLSX:', err);
-          alert('Não consegui exportar o arquivo .xlsx');
+          console.error(err); alert('Falha ao exportar.');
         }
       };
 
+      // importar CSV/XLSX
       const handleFileUpload = async (event) => {
         try {
-          const file = event.target.files?.[0];
-          if (!file) return;
+          const file = event.target.files?.[0]; if (!file) return;
+          const isCSV = file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
+          const readFile = () => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            if (isCSV) reader.readAsText(file, 'utf-8'); else reader.readAsArrayBuffer(file);
+          });
 
-          const isXLSX = /\.xlsx$/i.test(file.name);
-          const isXLS  = /\.xls$/i.test(file.name);
-          const isCSV  = /\.csv$/i.test(file.name);
+          const data = await readFile();
+          const wb = isCSV ? XLSX.read(data, {type:'string'}) : XLSX.read(data, {type:'array'});
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
 
-          console.log('Arquivo lido:', file.name);
+          const headerNorm = (h) => norm(String(h)).replace(/\s+/g,'').replace(/[^a-z0-9]/g,'');
+          const pick = (row, keys) => {
+            for (const k of Object.keys(row)) if (keys.includes(headerNorm(k))) return row[k];
+            return '';
+          };
 
-          try {
-            let rows;
-            let headerRowIndex = -1;
+          const mapped = rows.map(row => {
+            const desc = pick(row,['descricao','description','descrição']);
+            const rawAmount = pick(row,['valor','amount','preco','preço','price']);
+            const rawDate = pick(row,['data','date']);
+            const rawType = pick(row,['tipo','type']);
+            const rawSource = pick(row,['origem','fonte','paymentsource','source']);
+            const rawParcela = pick(row,['parcela','installment']);
+            const rawSplit = pick(row,['split','divisao','divisão']);
+            const rawPaidBy = pick(row,['paidby','pagopor']);
 
-            if (isXLSX || isXLS) {
-              const buffer = await file.arrayBuffer();
-              const wb = XLSX.read(new Uint8Array(buffer), {
-                type: 'array',
-                password: '130843',
-              });
-              const ws = wb.Sheets[wb.SheetNames[0]];
-              rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
-              headerRowIndex = rows.findIndex((r) => r.some((c) => norm(c).includes('data') && norm(c).includes('compra')));
-            } else if (isCSV) {
-              const tryRead = (enc) => new Promise((resolve) => {
-                const r = new FileReader();
-                r.onload = () => resolve(r.result);
-                r.readAsText(file, enc);
-              });
+            const t = norm(rawType);
+            const type = t.includes('ajuste') ? 'Ajuste' : t.includes('pix') ? 'Pix' : t.includes('boleto') ? 'Boleto' : 'Cartão';
 
-              const parseCsvContent = (text) => {
-                let txt = text;
-                if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1); // Strip BOM
+            const amount = parseMoney(String(rawAmount));
+            if (!Number.isFinite(amount) || !desc) return null;
 
-                const tryParseDelim = (delim) => txt.split(/\r?\n/).map(line =>
-                  line.split(delim).map(c => c.replace(/^"(.*)"$/, '$1').replace(/""/g, '"'))
-                );
+            const date = excelSerialToPT(rawDate);
+            const srcN = norm(rawSource);
+            const paymentSource = type === 'Cartão'
+              ? (srcN.includes('7292') || srcN.includes('digital') || /virt/.test(srcN)
+                  ? 'Cartão Digital (final 7292)'
+                  : (rawSource || (user==='Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)')))
+              : type;
 
-                let candidateRows = tryParseDelim(';');
-                let hIndex = candidateRows.findIndex(r => r.some(c => norm(c).includes('data') && norm(c).includes('compra')));
+            const split = canonicalSplit(rawSplit);
+            const paidNorm = norm(rawPaidBy);
+            const paidBy = type === 'Cartão' ? 'Cartão' :
+              paidNorm.includes('thais') ? 'Thais' :
+              paidNorm.includes('guilherme') ? 'Guilherme' : user;
 
-                if (hIndex === -1) {
-                  candidateRows = tryParseDelim(',');
-                  hIndex = candidateRows.findIndex(r => r.some(c => norm(c).includes('data') && norm(c).includes('compra')));
-                }
-                return { rows: candidateRows, headerIndex: hIndex };
-              };
-              
-              let txtUtf8 = await tryRead('utf-8');
-              let result = parseCsvContent(txtUtf8);
-
-              if (result.headerIndex === -1) {
-                let txtIso = await tryRead('ISO-8859-1');
-                result = parseCsvContent(txtIso);
-              }
-
-              rows = result.rows;
-              headerRowIndex = result.headerIndex;
-            } else {
-              alert('Formato não suportado. Use .xls, .xlsx ou .csv');
-              return;
+            let parcela = String(rawParcela||'').trim();
+            if (parcela && !/^\d+\/\d+$/.test(parcela)) {
+              const m = parcela.match(/(\d+)\D+(\d+)/);
+              parcela = m ? `${m[1]}/${m[2]}` : '';
             }
+            if (!parcela) parcela = null;
 
-            if (headerRowIndex === -1) {
-              alert('Cabeçalho não encontrado (procurei "Data de compra").');
-              return;
-            }
-            const header = rows[headerRowIndex];
+            return { description: desc, amount, date, split, paidBy, paymentSource, type, parcela };
+          }).filter(Boolean);
 
-            const getIndex = (pred) => header.findIndex((c) => pred(norm(c)));
-            const idx = {
-              data:        getIndex(c => c.includes('data') && c.includes('compra')), // "data de compra" / "data da compra"
-              finalCartao: getIndex(c => /final.*cart(a|ã)o/.test(c) || c === 'final do cartao'),
-              descricao:   getIndex(c => c === 'descricao' || c.includes('descri')),
-              parcela:     getIndex(c => c.includes('parcela')),
-              valorBRL:    getIndex(c => c.includes('valor') && (c.includes('r$') || c.includes('brl')))
-            };
-
-            if (idx.data < 0 || idx.descricao < 0 || idx.valorBRL < 0) {
-              console.log('Header detectado:', header);
-              console.log('Idx:', idx);
-              alert('Colunas obrigatórias não encontradas (Data de compra, Descrição, Valor).');
-              return;
-            }
-
-            const dataRows = rows.slice(headerRowIndex + 1).filter(r => r.some(c => String(c).trim() !== ''));
-
-            const allNewExpenses = dataRows
-              .map((row) => {
-                const rawDesc  = row[idx.descricao];
-                const rawValor = row[idx.valorBRL];
-                if (!rawDesc && !rawValor) return null;
-
-                const descStr = String(rawDesc || '');
-                const descLow = norm(descStr);
-                if (descLow.includes('inclusao de pagamento') || descLow.includes('inclusão de pagamento')) {
-                  return null;
-                }
-                
-                const finalCartaoStr = idx.finalCartao >= 0 ? String(row[idx.finalCartao] || '').trim() : '';
-                
-                const source =
-                  finalCartaoStr.endsWith('2581') ? 'Cartão Guilherme (final 2581)' :
-                  finalCartaoStr.endsWith('1009') ? 'Cartão Thais (final 1009)' :
-                                                     'Cartão Digital (final 7292)';
-
-                const amount = parseMoney(rawValor);
-                if (!Number.isFinite(amount)) return null;
-
-                let description = descStr || 'Sem descrição';
-                if (amount < 0) description = `Estorno: ${description}`;
-
-                const parcelaInfo =
-                  idx.parcela >= 0 && row[idx.parcela] && row[idx.parcela] !== 'Única'
-                    ? String(row[idx.parcela])
-                    : null;
-
-                const dataCompra = excelSerialToPT(row[idx.data]) || new Date().toLocaleDateString('pt-PT');
-
-                return {
-                  description,
-                  amount,
-                  date: dataCompra,
-                  split: 'Dividido',
-                  paidBy: 'Guilherme',   // <- você paga a fatura inteira
-                  paymentSource: source,    // de qual cartão veio
-                  type: 'Cartão',
-                  parcela: parcelaInfo
-                };
-              })
-              .filter(Boolean);
-            
-            console.log('Linhas parseadas:', rows.length, 'Novos lançamentos:', allNewExpenses.length);
-            setImportedExpenses(allNewExpenses);
-            setImportModalOpen(true);
-          } catch (readError) {
-            console.error('Erro ao processar o ficheiro:', readError);
-            alert('Não consegui ler a planilha. Confirme a senha e o layout.');
-          }
-
-          event.target.value = null;
-        } catch (uploadError) {
-          console.error('Erro no upload do ficheiro:', uploadError);
-          alert('Falha no upload do ficheiro.');
+          if (mapped.length === 0) { alert('Não encontrei linhas válidas para importar.'); return; }
+          setImportedExpenses(mapped);
+          setImportModalOpen(true);
+        } catch (e) {
+          console.error('Erro no upload:', e); alert('Falha ao carregar ficheiro.');
+        } finally {
+          event.target.value = '';
         }
       };
 
@@ -659,364 +388,305 @@
         if (isImporting) return;
         setIsImporting(true);
         try {
-          const uniqueImportedExpenses = importedExpenses.filter(imp =>
+          const unique = importedExpenses.filter(imp =>
             !expenses.some(ex =>
               ex.description === imp.description &&
               Math.abs(ex.amount - imp.amount) < 0.01 &&
               ex.date === imp.date &&
               ex.parcela === imp.parcela &&
-              ex.paymentSource === imp.paymentSource
+              ex.paymentSource === imp.paymentSource &&
+              ex.type === imp.type &&
+              canonicalSplit(ex.split) === canonicalSplit(imp.split)
             )
           );
-          const batch = db.batch();
-          uniqueImportedExpenses.forEach(e => batch.set(expensesColRef.doc(), e));
-          await batch.commit();
-          setImportedExpenses([]);
-          setImportModalOpen(false);
-        } catch (e) {
-          console.error(e);
-          alert('Falha ao importar.');
-        } finally {
-          setIsImporting(false);
-        }
+          const chunkSize = 450;
+          for (let i=0;i<unique.length;i+=chunkSize) {
+            const chunk = unique.slice(i,i+chunkSize);
+            const batch = db.batch();
+            chunk.forEach(e => batch.set(expensesColRef.doc(), e));
+            await batch.commit();
+          }
+          setImportedExpenses([]); setImportModalOpen(false);
+        } catch (e) { console.error(e); alert('Falha ao importar.'); }
+        finally { setIsImporting(false); }
       };
 
+      /* ===== cálculos/memos ===== */
       const filteredAndSortedExpenses = useMemo(() => {
-        const userVisible = user === 'Guilherme'
-          ? expenses.filter(e => e.type === 'Cartão'
-              ? (e.paymentSource?.includes('2581') || e.paymentSource?.includes('7292'))
-              : (e.paidBy === 'Guilherme' || e.paidBy === 'Digital'))
-          : expenses.filter(e => e.type === 'Cartão'
-              ? e.paymentSource?.includes('1009')
-              : e.paidBy === 'Thais');
+        const toDate = d => d ? new Date(d.split('/').reverse().join('-')) : new Date(0);
+        const userVisible = expenses.filter(e => {
+          if (e.type === 'Cartão') {
+            const src = e.paymentSource || '';
+            if (src.includes('7292')) return true; // digital visível p/ ambos
+            return user === 'Guilherme' ? src.includes('2581') : src.includes('1009');
+          }
+          return e.paidBy === user || e.type === 'Ajuste';
+        });
 
         let filtered = userVisible;
         switch (filter) {
-          case 'Cartão': filtered = userVisible.filter((e) => e.type === 'Cartão' && !e.parcela); break;
-          case 'Parcelados': filtered = userVisible.filter((e) => !!e.parcela); break;
-          case 'Pix': filtered = userVisible.filter((e) => e.type === 'Pix'); break;
-          case 'Boleto': filtered = userVisible.filter((e) => e.type === 'Boleto'); break;
-          default: filtered = userVisible;
+          case 'Cartão':     filtered = userVisible.filter(e => e.type==='Cartão' && !e.parcela); break;
+          case 'Parcelados': filtered = userVisible.filter(e => !!e.parcela); break;
+          case 'Pix':        filtered = userVisible.filter(e => e.type==='Pix'); break;
+          case 'Boleto':     filtered = userVisible.filter(e => e.type==='Boleto'); break;
+          default:           filtered = userVisible;
         }
-        return filtered.sort((a, b) => {
-          const aDate = new Date(a.date.split('/').reverse().join('-'));
-          const bDate = new Date(b.date.split('/').reverse().join('-'));
-          if (filter === 'Todos') {
+
+        return filtered.sort((a,b) => {
+          const ad = toDate(a.date), bd = toDate(b.date);
+          if (filter==='Todos') {
             const ap = !!a.parcela, bp = !!b.parcela;
-            if (ap !== bp) return ap ? 1 : -1;
+            if (ap !== bp) return ap ? 1 : -1; // não-parcelados primeiro
           }
-          return bDate - aDate;
+          return bd - ad;
         });
       }, [expenses, filter, user]);
-      
-      // Totais de fatura (conta só cartões)
+
       const cardTotals = useMemo(() => {
-        const sumBy = (needle) =>
-          round2(
-            expenses
-              .filter((e) => e.type === 'Cartão')        // <- só cartão
-              .filter((e) => e.paymentSource?.includes(needle))
-              .reduce((s, e) => s + e.amount, 0)
-          );
-
-        const guilhermeCardTotal = sumBy('2581');
-        const thaisCardTotal     = sumBy('1009');
-        const digitalCardTotal   = sumBy('7292');
-
-        const grandTotal = round2(
-          guilhermeCardTotal + thaisCardTotal + digitalCardTotal
-        );
-
-        return { guilhermeCardTotal, thaisCardTotal, digitalCardTotal, grandTotal };
+        const sum = (needle) => round2(expenses.filter(e => e.type==='Cartão' && (e.paymentSource||'').includes(needle))
+          .reduce((s,e)=>s+Number(e.amount||0),0));
+        const t2581 = sum('2581'), t1009 = sum('1009'), t7292 = sum('7292');
+        return { guilhermeCardTotal:t2581, thaisCardTotal:t1009, digitalCardTotal:t7292, grandTotal: round2(t2581+t1009+t7292) };
       }, [expenses]);
 
-      const parts = useMemo(() => {
-        let g = 0, t = 0;
-        const sourceBase =
-          expenses.filter(e => e.type !== 'Ajuste'); // ajuste não entra nas partes
-        const source =
-          (scope === 'geral')
-            ? sourceBase
-            : (scope === 'cartao')
-              ? sourceBase.filter(e => e.type === 'Cartão')
-              : sourceBase.filter(e => e.type === 'Pix' || e.type === 'Boleto');
-        
-        for (const e of source) {
-          const splitVal = (e.split || '').toString();
-          if (splitVal === 'Dividido') { g += e.amount / 2; t += e.amount / 2; }
-          else if (splitVal === 'Guilherme' || splitVal === 'Apenas Guilherme') g += e.amount;
-          else if (splitVal === 'Thais' || splitVal === 'Apenas Thais') t += e.amount;
-          else { g += e.amount / 2; t += e.amount / 2; }
+      const partsScoped = useMemo(() => {
+        let g=0, t=0;
+        const base = expenses.filter(e => e.type!=='Ajuste');
+        const src = scope==='geral' ? base : scope==='cartao' ? base.filter(e=>e.type==='Cartão') : base.filter(e=>e.type==='Pix'||e.type==='Boleto');
+        for (const e of src) {
+          const v = Number(e.amount||0), s = canonicalSplit(e.split);
+          if (s==='Dividido') { g+=v/2; t+=v/2; }
+          else if (s==='Guilherme') g+=v;
+          else if (s==='Thais') t+=v;
         }
-        return { g: round2(g), t: round2(t) };
+        return { g:round2(g), t:round2(t) };
       }, [expenses, scope]);
+
+      const partsPagos = useMemo(() => {
+        let g=0, t=0;
+        const src = expenses.filter(e => e.type==='Pix' || e.type==='Boleto');
+        for (const e of src) {
+          const v = Number(e.amount||0), s = canonicalSplit(e.split);
+          if (s==='Dividido') { g+=v/2; t+=v/2; }
+          else if (s==='Guilherme') g+=v;
+          else if (s==='Thais') t+=v;
+        }
+        return { g:round2(g), t:round2(t) };
+      }, [expenses]);
 
       const { gPaid, tPaid } = useMemo(() => {
-        let gPaid = 0, tPaid = 0;
-        const source =
-          (scope === 'geral')
-            ? expenses // em "geral", consideramos Ajuste para acertar o saldo
-            : (scope === 'cartao')
-              ? expenses.filter(e => e.type === 'Cartão')
-              : expenses.filter(e => e.type === 'Pix' || e.type === 'Boleto');
-        
-        for (const e of source) {
-          const paidBy = e.paidBy || 'Guilherme'; // Default to Guilherme if missing
-          if (paidBy === 'Guilherme' || paidBy === 'Digital') {
-            gPaid += e.amount;
-          } else if (paidBy === 'Thais') {
-            tPaid += e.amount;
-          }
+        let g=0, t=0;
+        const reals = expenses.filter(e => e.type==='Pix' || e.type==='Boleto' || e.type==='Ajuste');
+        for (const e of reals) {
+          const v = Number(e.amount||0);
+          if (e.paidBy==='Guilherme' || e.paidBy==='Digital') g+=v;
+          else if (e.paidBy==='Thais') t+=v;
         }
-        return { gPaid: round2(gPaid), tPaid: round2(tPaid) };
-      }, [expenses, scope]);
-      
-      const gBalance = round2(gPaid - parts.g);
+        return { gPaid:round2(g), tPaid:round2(t) };
+      }, [expenses]);
 
-      // saldo do ponto de vista de QUEM ESTÁ LOGADO
-      // gBalance > 0  => Guilherme pagou além da parte dele (Thais deve a ele)
-      const saldoUsuario = user === 'Guilherme' ? gBalance : -gBalance;
-      const reembolsoValorSigned = round2(saldoUsuario);
-
-      const { reembolsoLabel, reembolsoCor } = (() => {
-        if (Math.abs(reembolsoValorSigned) < 0.01) {
-          return { reembolsoLabel: 'Contas em dia!', reembolsoCor: 'text-emerald-500' };
-        }
-        const outro = user === 'Guilherme' ? 'Thais' : 'Guilherme';
-        return reembolsoValorSigned > 0
-          ? { reembolsoLabel: `Você tem a receber de ${outro}`, reembolsoCor: 'text-emerald-500' }
-          : { reembolsoLabel: `Você deve para ${outro}`,       reembolsoCor: 'text-amber-500' };
-      })();
-      
-      const diffRaw = round2(gPaid - tPaid); // >0 => Guilherme pagou mais
-      const diffAbs = Math.abs(diffRaw);
-
-      const diffTexto = (() => {
-        if (diffAbs < 0.01) return 'Empate';
-        if (user === 'Guilherme') {
-          return diffRaw > 0 ? 'Você pagou a mais' : 'Thais pagou a mais do que você';
-        } else {
-          return diffRaw > 0 ? 'Guilherme pagou a mais do que você' : 'Você pagou a mais';
-        }
+      const minhaParteFatura = user==='Guilherme' ? partsScoped.g : partsScoped.t;
+      const parteDoOutroFatura = user==='Guilherme' ? partsScoped.t : partsScoped.g;
+      const valorDevolverSePagarTudo = parteDoOutroFatura;
+      const difGastos = round2(Math.abs(partsScoped.g - partsScoped.t));
+      const quemGastouMaisLabel = (() => {
+        if (difGastos < 0.01) return 'Gastos empatados';
+        const quem = partsScoped.g > partsScoped.t ? 'Guilherme' : 'Thais';
+        return user === quem ? 'Você gastou a mais' : `${quem} gastou a mais`;
       })();
 
-      const myPart    = round2(user === 'Guilherme' ? parts.g : parts.t);
-      const otherPart = round2(user === 'Guilherme' ? parts.t : parts.g);
-      
-      const FilterButton = ({ label, filter, setFilter, theme }) => {
-        const isActive = filter === label;
-        return (
-          <button
-            onClick={() => setFilter(label)}
-            className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold rounded-full transition ${
-              isActive
-                ? `${theme.bg} text-white shadow`
-                : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-            }`}
-          >
-            {label}
-          </button>
-        );
-      };
+      const labelQuitarTudo = scope==='cartao'
+        ? `Se você pagar a fatura por inteiro, ${otherUser} te devolve:`
+        : `Se você quitar tudo deste filtro, ${otherUser} te devolve:`;
 
+      const gBalance = round2(gPaid - partsPagos.g);
+      const saldoUsuario = user==='Guilherme' ? gBalance : -gBalance;
+      const { saldoLabel, saldoCor } = (() => {
+        if (Math.abs(saldoUsuario) < 0.01) return { saldoLabel:'Saldo zerado!', saldoCor:'text-emerald-500' };
+        return saldoUsuario > 0
+          ? { saldoLabel:`Você tem a receber de ${otherUser}`, saldoCor:'text-emerald-500' }
+          : { saldoLabel:`Você deve para ${otherUser}`,   saldoCor:'text-amber-500'  };
+      })();
+
+      /* ===== UI ===== */
       return (
         <div className="max-w-4xl mx-auto p-2 sm:p-4 pb-24">
-          <header className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-6 gap-4">
+          <header className="relative mb-6">
             <div>
-              <h1 className="text-2xl font-bold">Olá, {user}</h1>
+              <h1 className="text-3xl font-extrabold">Olá, {user}</h1>
               <p className="text-slate-500 dark:text-slate-400">Resumo das suas despesas.</p>
             </div>
-            <div className="flex items-start justify-between w-full sm:w-auto sm:space-x-6">
-              <div className="text-left sm:text-right text-sm">
-                <div>
-                  <h3 className="font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Faturas</h3>
-                  <div className="space-y-1 text-slate-500 dark:text-slate-400">
-                    <p>Guilherme: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.guilhermeCardTotal)}</span></p>
-                    <p>Thais: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.thaisCardTotal)}</span></p>
-                    <p>Digital: <span className="font-bold text-slate-700 dark:text-slate-300">{formatBRL(cardTotals.digitalCardTotal)}</span></p>
-                    <hr className="my-2 border-slate-200 dark:border-slate-700" />
-                    <p className="font-bold">Total Geral: <span className={`${theme.text} ${theme.darkText}`}>{formatBRL(cardTotals.grandTotal)}</span></p>
-                  </div>
-                </div>
-              </div>
-              <button
-                aria-label="Sair"
-                onClick={onLogout}
-                className={
-                  `text-slate-500 transition ` +
-                  (user === 'Guilherme'
-                    ? 'hover:text-indigo-600 dark:hover:text-indigo-400'
-                    : 'hover:text-pink-600 dark:hover:text-pink-400')
-                }
-                title="Sair"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-              </button>
-            </div>
+            <button onClick={onLogout}
+              className="absolute top-0 right-0 p-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600"
+              aria-label="Trocar de usuário" title="Trocar de usuário">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M14 16l4-4-4-4M8 12h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
-              <h3 className="font-semibold mb-4 text-slate-600 dark:text-slate-400">Acerto de Contas</h3>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {[
-                  { key: 'geral', label: 'Geral' },
-                  { key: 'cartao', label: 'Só Cartões' },
-                  { key: 'pixboleto', label: 'Pix e Boletos' },
-                ].map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => setScope(opt.key)}
-                    className={
-                      `px-3 py-1.5 rounded-full text-sm font-semibold transition ` +
-                      (scope === opt.key
-                        ? `${theme.bg} text-white shadow`
-                        : `bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600`)
-                    }
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-slate-500 dark:text-slate-400 mb-1">
-                {reembolsoLabel}
-              </p>
-              <p className={`${reembolsoCor} text-3xl sm:text-4xl font-extrabold`}>
-                {formatBRL(reembolsoValorSigned)}
-              </p>
-              <div className="mt-4">
-                <button
-                  onClick={exportXLSX}
-                  className={`px-4 py-2 rounded-lg font-semibold text-white ${theme.bg} ${theme.hoverBg}`}
-                  title="Exportar Excel com cartões, pix/boletos e resumo"
-                >
-                  Exportar Excel
-                </button>
-              </div>
-              <hr className="my-4 border-slate-200 dark:border-slate-700" />
-              <div>
-                <h4 className="font-semibold mb-1 text-slate-600 dark:text-slate-400">Diferença nos gastos</h4>
-                <p className="text-sky-400 text-2xl font-bold">{formatBRL(diffAbs)}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {diffTexto}
-                </p>
+          <div className="grid gap-4 md:grid-cols-2 mb-6">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-3">
+              <h3 className="font-semibold text-slate-600 dark:text-slate-400">Total das faturas (cartões)</h3>
+              <p className="text-3xl font-extrabold">{formatBRL(cardTotals.grandTotal)}</p>
+              <div className="text-xs space-y-1">
+                <p>Guilherme 2581: <span className="font-semibold">{formatBRL(cardTotals.guilhermeCardTotal)}</span></p>
+                <p>Thais 1009: <span className="font-semibold">{formatBRL(cardTotals.thaisCardTotal)}</span></p>
+                <p>Digital 7292: <span className="font-semibold">{formatBRL(cardTotals.digitalCardTotal)}</span></p>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md">
-              <h3 className="font-semibold mb-2 text-slate-600 dark:text-slate-400">Detalhes</h3>
-              <div className="text-sm space-y-2">
-                <p>A sua parte: <span className="font-semibold">{formatBRL(myPart)}</span></p>
-                <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(otherPart)}</span></p>
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-3">
+              <h3 className="font-semibold text-slate-600 dark:text-slate-400">Saldo de Acerto Real</h3>
+              <p className="text-slate-500 dark:text-slate-400">{saldoLabel}</p>
+              <p className={`${saldoCor} text-3xl font-extrabold`}>{formatBRL(saldoUsuario)}</p>
+              <hr className="border-slate-200 dark:border-slate-700" />
+              <div className="text-sm">
+                <p>Pagamentos/Ajustes feitos por você: <span className="font-semibold">{formatBRL(user==='Guilherme' ? gPaid : tPaid)}</span></p>
+                <p>Pagamentos/Ajustes feitos por {otherUser}: <span className="font-semibold">{formatBRL(user==='Guilherme' ? tPaid : gPaid)}</span></p>
               </div>
+              <button onClick={exportXLSX}
+                className={`w-full mt-2 px-4 py-2 rounded-lg font-semibold text-white ${theme.bg} ${theme.hover}`}>
+                Exportar Relatório
+              </button>
             </div>
           </div>
 
-          <div className="flex space-x-2 mb-6">
-            <button onClick={openAddModal} className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center ${theme.bg} ${theme.hoverBg}`}><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>Adicionar</button>
-            <button onClick={() => fileInputRef.current?.click()} className="cursor-pointer flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>Importar</button>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} multiple={false} />
-            <button onClick={() => setIsClearModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-4 mb-6">
+            <h3 className="font-semibold text-slate-600 dark:text-slate-400">Resumo da Fatura (Gastos)</h3>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={()=>setScope('geral')}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${scope==='geral' ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}`}>Geral</button>
+              <button onClick={()=>setScope('cartao')}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${scope==='cartao' ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}`}>Só Cartões</button>
+              <button onClick={()=>setScope('pixboleto')}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${scope==='pixboleto' ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}`}>Pix e Boletos</button>
+            </div>
+            <div>
+              <p className="text-slate-500 dark:text-slate-400 mb-1">{labelQuitarTudo}</p>
+              <p className={`${theme.text} ${theme.darkText} text-3xl font-extrabold`}>{formatBRL(valorDevolverSePagarTudo)}</p>
+            </div>
+            <hr className="border-slate-200 dark:border-slate-700" />
+            <div>
+              <p className="font-semibold text-slate-600 dark:text-slate-400">{quemGastouMaisLabel}</p>
+              <p className="text-sky-400 text-2xl font-bold">{formatBRL(difGastos)}</p>
+            </div>
+            <div>
+              <p>Sua parte na fatura: <span className="font-semibold">{formatBRL(minhaParteFatura)}</span></p>
+              <p>Parte de {otherUser}: <span className="font-semibold">{formatBRL(parteDoOutroFatura)}</span></p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mb-6">
+            <button onClick={()=>setIsAddOpen(true)}
+              className={`flex-1 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition ${theme.bg} ${theme.hover}`}>
+              Adicionar
+            </button>
+            <button onClick={()=>fileInputRef.current?.click()}
+              className="flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600">
+              Importar
+            </button>
+            <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} />
+            <button onClick={()=>setIsClearModalOpen(true)}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg">
               Limpar
             </button>
           </div>
 
           <div className="bg-white dark:bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-md">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 px-2">
-              <h2 className="text-xl font-bold mb-3 sm:mb-0">Lançamentos</h2>
-              <div className="flex flex-wrap gap-1 sm:gap-2 justify-start">
-                <FilterButton label="Todos" filter={filter} setFilter={setFilter} theme={theme} />
-                <FilterButton label="Cartão" filter={filter} setFilter={setFilter} theme={theme} />
-                <FilterButton label="Parcelados" filter={filter} setFilter={setFilter} theme={theme} />
-                <FilterButton label="Pix" filter={filter} setFilter={setFilter} theme={theme} />
-                <FilterButton label="Boleto" filter={filter} setFilter={setFilter} theme={theme} />
-              </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['Todos','Cartão','Parcelados','Pix','Boleto'].map(opt => (
+                <button key={opt} onClick={()=>setFilter(opt)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${filter===opt ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}`}>
+                  {opt}
+                </button>
+              ))}
             </div>
             <div className="space-y-2">
-              {filteredAndSortedExpenses.length > 0 ? filteredAndSortedExpenses.map(expense => {
-                const borderClass = expense.split === 'Guilherme' ? themes.Guilherme.borderClass : expense.split === 'Thais' ? themes.Thais.borderClass : 'border-transparent';
-                let isLastInstallment = false;
-                if (expense.parcela) { const [current, total] = expense.parcela.split('/').map(Number); if (current === total) isLastInstallment = true; }
+              {filteredAndSortedExpenses.map(expense => {
+                const splitCan = canonicalSplit(expense.split);
                 return (
-                  <div key={expense.id} className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${borderClass} gap-2`}>
+                  <div key={expense.id}
+                       className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
+                         splitCan==='Guilherme' ? 'border-indigo-500' : splitCan==='Thais' ? 'border-pink-500' : 'border-transparent'
+                       }`}>
                     <div className="flex-grow">
-                      <p className="font-semibold flex items-center text-sm sm:text-base">
-                        {expense.description}
-                        {expense.parcela && (<span className={`text-xs font-semibold px-2 py-0.5 rounded-full ml-2 ${isLastInstallment ? 'bg-emerald-100 dark:bg-emerald-800/50 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`}>{expense.parcela}</span>)}
+                      <p className="font-semibold">{expense.description}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {expense.date} {expense.parcela ? `• ${expense.parcela}` : ''} • {expense.type}
                       </p>
-                      {(() => {
-                         const isCard = expense.type === 'Cartão';
-                         const srcLabel = isCard ? (expense.paymentSource || expense.paidBy) : expense.type; // Pix/Boleto
-                         return (
-                           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                             {expense.date} - {srcLabel} - {expense.split}{isCard ? ' - Cartão' : ''}
-                           </p>
-                         );
-                       })()}
                     </div>
                     <div className="text-right flex-shrink-0 flex items-center gap-2">
-                      <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 whitespace-nowrap">
-                        Pago por: {expense.paidBy}
-                      </span>
-                      <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(expense.amount)}</p>
-                      <div className="flex items-center space-x-1">
-                        <button aria-label="Editar lançamento" onClick={() => openEditModal(expense)} className="text-slate-400 hover:text-blue-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg></button>
-                        <button aria-label="Excluir lançamento" onClick={() => setDeletingExpenseId(expense.id)} className="text-slate-400 hover:text-red-500 p-1"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg></button>
-                      </div>
+                      {expense.type !== 'Cartão' && (
+                        <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 whitespace-nowrap">
+                          Pago por: {expense.paidBy}
+                        </span>
+                      )}
+                      {expense.type === 'Cartão' && (
+                        <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 whitespace-nowrap">
+                          {(expense.paymentSource||'').includes('7292') ? 'Cartão Digital' : (expense.paymentSource || 'Cartão')}
+                        </span>
+                      )}
+                      <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>
+                        {formatBRL(expense.amount)}
+                      </p>
                     </div>
                   </div>
-                )}) : (<p className="text-center text-slate-500 dark:text-slate-400 py-8">Nenhum lançamento para este filtro.</p>)}
+                );
+              })}
+              {filteredAndSortedExpenses.length===0 && (
+                <div className="p-4 text-sm text-slate-500 dark:text-slate-400">Sem lançamentos neste filtro.</div>
+              )}
             </div>
           </div>
-          <ExpenseForm
-            isOpen={isModalOpen}
-            onClose={() => setIsModalOpen(false)}
-            expense={editingExpense}
-            currentUser={user}
-            theme={theme}
-            addSingleExpense={addSingleExpense}
-            addInstallmentPlan={addInstallmentPlan}
-            updateExpense={updateExpense}
-          />
-          <Modal isOpen={isImportModalOpen} onClose={() => setImportModalOpen(false)}>
-            <div className="p-6">
-              <h2 className="text-xl font-bold mb-4">Confirmar Importação</h2>
-              <p className="mb-6">Está prestes a adicionar {importedExpenses.filter(i => !expenses.some(e => e.description === i.description && Math.abs(e.amount - i.amount) < 0.01 && e.date === i.date && e.parcela === i.parcela && e.paymentSource === i.paymentSource)).length} novos lançamentos. Deseja continuar?</p>
-              <div className="flex justify-end space-x-3">
-                <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button>
-                <button
-                  onClick={confirmImport}
-                  className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg} disabled:opacity-60`}
-                  disabled={importedExpenses.length === 0 || isImporting}
-                >
-                  {isImporting ? 'A importar…' : 'Confirmar'}
-                </button>
+
+          <Modal isOpen={isAddOpen} onClose={()=>setIsAddOpen(false)}>
+            <div className="p-5 space-y-3">
+              <h2 id="modal-title" className="text-lg font-semibold">Novo lançamento</h2>
+              <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Descrição" value={fDesc} onChange={e=>setFDesc(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Valor (ex: 123,45)" inputMode="decimal" value={fValor} onChange={e=>setFValor(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="dd/mm/aaaa" value={fData} onChange={e=>setFData(e.target.value)} />
+              <div className="flex gap-2">
+                <select className="flex-1 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" value={fTipo} onChange={e=>setFTipo(e.target.value)}>
+                  <option>Cartão</option><option>Pix</option><option>Boleto</option><option>Ajuste</option>
+                </select>
+                <select className="flex-1 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" value={fSplit} onChange={e=>setFSplit(e.target.value)}>
+                  <option>Dividido</option><option>Guilherme</option><option>Thais</option>
+                </select>
+              </div>
+              {fTipo==='Cartão' && (
+                <select className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" value={fFonte} onChange={e=>setFFonte(e.target.value)}>
+                  <option>Cartão Guilherme (final 2581)</option>
+                  <option>Cartão Thais (final 1009)</option>
+                  <option>Cartão Digital (final 7292)</option>
+                </select>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={()=>setIsAddOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">Cancelar</button>
+                <button onClick={salvarLancamento} disabled={salvando} className={`px-4 py-2 rounded-lg text-white ${theme.bg} ${theme.hover}`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
               </div>
             </div>
           </Modal>
-          <Modal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)}>
-            <div className="p-6">
-              <div className="flex items-center justify-center mb-4">
-                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-                </div>
-              </div>
-              <h2 className="text-xl font-bold mb-2 text-center">Apagar Todos os Dados?</h2>
-              <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Esta ação é permanente. Todos os lançamentos e planos de parcelamento serão excluídos.</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setIsClearModalOpen(false)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
-                <button onClick={confirmAndClearAll} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Confirmar Exclusão</button>
+
+          <Modal isOpen={isImportModalOpen} onClose={()=>setImportModalOpen(false)}>
+            <div className="p-5">
+              <h2 id="modal-title" className="text-lg font-semibold mb-2">Confirmar importação</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">Encontrados <b>{importedExpenses.length}</b> lançamentos válidos. Deseja importar agora?</p>
+              <div className="flex gap-2 justify-end">
+                <button onClick={()=>setImportModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">Cancelar</button>
+                <button onClick={confirmImport} className={`px-4 py-2 rounded-lg text-white ${theme.bg} ${theme.hover}`} disabled={isImporting}>{isImporting ? 'Importando...' : 'Importar'}</button>
               </div>
             </div>
           </Modal>
-          <Modal isOpen={!!deletingExpenseId} onClose={() => setDeletingExpenseId(null)}>
-            <div className="p-6">
-              <h2 className="text-xl font-bold mb-2 text-center">Excluir Lançamento?</h2>
-              <p className="text-slate-500 dark:text-slate-400 text-center mb-6">Tem a certeza que deseja excluir este lançamento? Esta ação não pode ser desfeita.</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setDeletingExpenseId(null)} className="w-full px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold transition">Cancelar</button>
-                <button onClick={confirmAndDeleteExpense} className="w-full px-4 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 transition">Sim, Excluir</button>
+
+          <Modal isOpen={isClearModalOpen} onClose={()=>setIsClearModalOpen(false)}>
+            <div className="p-5">
+              <h2 id="modal-title" className="text-lg font-semibold mb-2 text-red-600">Apagar tudo?</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">Isso irá apagar todas as despesas e planos de parcelamento. Esta ação não pode ser desfeita.</p>
+              <div className="flex gap-2 justify-end">
+                <button onClick={()=>setIsClearModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">Cancelar</button>
+                <button onClick={confirmAndClearAll} className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white">Apagar</button>
               </div>
             </div>
           </Modal>
@@ -1024,150 +694,11 @@
       );
     };
 
-    const ExpenseForm = ({ isOpen, onClose, expense, currentUser, theme, addSingleExpense, addInstallmentPlan, updateExpense }) => {
-      const [description, setDescription] = useState('');
-      const [amount, setAmount] = useState('');
-      const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-      const [paymentSource, setPaymentSource] = useState('');
-      const [paidByLocal, setPaidByLocal] = useState(currentUser === 'Guilherme' ? 'Guilherme' : 'Thais');
-      const [split, setSplit] = useState('Dividido');
-      const [type, setType] = useState('Cartão');
-      const [totalInstallments, setTotalInstallments] = useState('1');
-
-      useEffect(() => {
-        const defaultSource = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
-        if (expense) {
-          setDescription(expense.description);
-          setAmount(String(expense.amount).replace('.', ','));
-          setDate(expense.date ? new Date(expense.date.split('/').reverse().join('-')).toISOString().split('T')[0] : '');
-          setPaymentSource(expense.type === 'Cartão' ? (expense.paymentSource || defaultSource) : '');
-          setPaidByLocal(expense.paidBy || (currentUser === 'Guilherme' ? 'Guilherme' : 'Thais'));
-          setSplit(expense.split);
-          setType(expense.type || 'Cartão');
-          setTotalInstallments(expense.parcela ? expense.parcela.split('/')[1] : '1');
-        } else {
-          setDescription('');
-          setAmount('');
-          setDate(new Date().toISOString().split('T')[0]);
-          setPaymentSource(defaultSource);
-          setPaidByLocal(currentUser === 'Guilherme' ? 'Guilherme' : 'Thais');
-          setSplit('Dividido');
-          setType('Cartão');
-          setTotalInstallments('1');
-        }
-      }, [expense, isOpen, currentUser]);
-
-      const handleSubmit = (e) => {
-        e.preventDefault();
-        const isCard = type === 'Cartão';
-        const paidBy = isCard ? 'Guilherme' : paidByLocal;
-        const finalPaymentSource = isCard ? paymentSource : type; // 'Pix' ou 'Boleto'
-
-        if (expense) {
-          updateExpense({ ...expense, description, amount: parseMoney(amount), date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }), split, type, paymentSource: finalPaymentSource, paidBy });
-        } else {
-          const n = parseInt(totalInstallments, 10) || 1;
-          if (n > 1) {
-            addInstallmentPlan({
-              description,
-              totalAmount: parseMoney(amount),
-              numberOfInstallments: n,
-              startDate: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
-              split,
-              type,
-              paymentSource: finalPaymentSource,
-              paidBy
-            });
-          } else {
-            addSingleExpense({
-              description,
-              amount: parseMoney(amount),
-              date: new Date(date).toLocaleDateString('pt-PT', { timeZone: 'UTC' }),
-              split,
-              type,
-              paymentSource: finalPaymentSource,
-              paidBy,
-              parcela: null
-            });
-          }
-        }
-        onClose();
-      };
-
-      const inputClasses = `mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md shadow-sm ${theme.ring} ${theme.border}`;
-
-      return (
-        <Modal isOpen={isOpen} onClose={onClose}>
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
-            <h2 className="text-xl font-bold mb-4">{expense ? 'Editar Lançamento' : 'Novo Lançamento'}</h2>
-            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Descrição</label><input type="text" value={description} onChange={e => setDescription(e.target.value)} required className={inputClasses} /></div>
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Valor {expense ? '(da parcela)' : '(Total)'} (R$)</label><input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="123,45" required className={inputClasses} /></div>
-              <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">N.º de Prestações</label><input type="number" value={totalInstallments} onChange={e => setTotalInstallments(e.target.value)} min="1" disabled={!!expense} required className={`${inputClasses} disabled:opacity-50`} /></div>
-            </div>
-            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Data {expense ? '(do lançamento)' : '(da 1.ª prestação)'}</label><input type="date" value={date} onChange={e => setDate(e.target.value)} required className={inputClasses} /></div>
-            
-            {type === 'Cartão' ? (
-              <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago com</label>
-                <select
-                  value={paymentSource}
-                  onChange={e => setPaymentSource(e.target.value)}
-                  className={inputClasses}
-                >
-                  <option>Cartão Guilherme (final 2581)</option>
-                  <option>Cartão Thais (final 1009)</option>
-                  <option>Cartão Digital (final 7292)</option>
-                </select>
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Pago por</label>
-                <select value={paidByLocal} onChange={e => setPaidByLocal(e.target.value)} className={inputClasses}>
-                  <option>Guilherme</option>
-                  <option>Thais</option>
-                </select>
-              </div>
-            )}
-
-            <div><label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Divisão da despesa</label><select value={split} onChange={e => setSplit(e.target.value)} className={inputClasses}><option>Dividido</option><option value="Guilherme">Apenas Guilherme</option><option value="Thais">Apenas Thais</option></select></div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-600 dark:text-slate-400">Tipo</label>
-              <select
-                value={type}
-                onChange={e => {
-                  const newType = e.target.value;
-                  setType(newType);
-                  if (newType !== 'Cartão') {
-                    setPaymentSource('');
-                  } else {
-                    const def = currentUser === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)';
-                    setPaymentSource(def);
-                    setPaidByLocal('Guilherme');
-                  }
-                }}
-                className={inputClasses}
-              >
-                <option>Cartão</option>
-                <option>Pix</option>
-                <option>Boleto</option>
-              </select>
-            </div>
-            <div className="flex justify-end space-x-3 pt-4"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">Cancelar</button><button type="submit" className={`px-4 py-2 rounded-lg text-white font-semibold ${theme.bg} ${theme.hoverBg}`}>Salvar</button></div>
-          </form>
-        </Modal>
-      );
-    };
-
-    // ================== App (Firebase + Shell) ==================
+    /* ================= App (Firebase + Shell) ================= */
     const App = () => {
-      const [currentUser, setCurrentUser] = useState(() =>
-        JSON.parse(localStorage.getItem('meuAcertoUser') || 'null')
-      );
+      const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
       const [db, setDb] = useState(null);
-      const [auth, setAuth] = useState(null);
-      const [authed, setAuthed] = useState(false);
+      const [authReady, setAuthReady] = useState(false);
       const [error, setError] = useState(null);
 
       useEffect(() => {
@@ -1177,75 +708,47 @@
           projectId: "meu-acerto-app",
           storageBucket: "meu-acerto-app.appspot.com",
           messagingSenderId: "326844075367",
-          appId: "1:326844075367:web:0315e86713b1e0071f33c2"
+          appId: "1-326844075367-web-0315e86713b1e0071f33c2"
         };
-
         try {
-          if (firebase.apps.length === 0) firebase.initializeApp(firebaseConfig);
+          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
           const firestoreDb = firebase.firestore();
-          const firebaseAuth = firebase.auth();
+          firestoreDb.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
           setDb(firestoreDb);
-          setAuth(firebaseAuth);
 
-          // Listener garante que só seguimos quando o usuário anónimo existir
-          const unsub = firebaseAuth.onAuthStateChanged((u) => setAuthed(!!u));
-
+          const auth = firebase.auth();
+          const unsub = auth.onAuthStateChanged(u => setAuthReady(!!u));
           (async () => {
             try {
-              await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-              // se já estiver anónimo, isso não cria outra sessão
-              await firebaseAuth.signInAnonymously();
+              await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+              await auth.signInAnonymously();
             } catch (err) {
               console.error("Auth error:", err);
-              setError(`Erro de autenticação: ${err.message}. Verifique se o login anónimo está ativo no Firebase.`);
+              setError(`Erro de autenticação: ${err.message}.`);
             }
           })();
-
-          // cleanup do listener
           return () => unsub();
         } catch (err) {
           console.error("Failed to initialize Firebase:", err);
-          setError("Falha ao inicializar o Firebase. Verifique as credenciais.");
+          setError("Falha ao inicializar o Firebase.");
         }
       }, []);
 
-      const handleSelectUser = (user) => {
-        setCurrentUser(user);
-        localStorage.setItem('meuAcertoUser', JSON.stringify(user));
-      };
-      const handleLogout = () => {
-        setCurrentUser(null);
-        localStorage.removeItem('meuAcertoUser');
-      };
+      const handleSelectUser = (u) => { setCurrentUser(u); localStorage.setItem('meuAcertoUser', JSON.stringify(u)); };
+      const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('meuAcertoUser'); };
 
-      if (error)
-        return (
-          <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">
-            {error}
-          </div>
-        );
-
-      // Gate também verifica "authed"
-      if (!db || !auth || !authed)
-        return (
-          <div className="min-h-screen flex items-center justify-center text-slate-500">
-            A ligar ao servidor...
-          </div>
-        );
-
+      if (error) return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>;
+      if (!db || !authReady) return <div className="min-h-screen flex items-center justify-center text-slate-500">A ligar ao servidor…</div>;
       if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />;
 
       return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
     };
 
-    // Mount + Service Worker
+    // mount + SW
     window.onload = () => {
       createRoot(document.getElementById('root')).render(<App />);
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').then(
-          (reg) => console.log('SW registado:', reg),
-          (err) => console.log('Falha ao registar o SW:', err)
-        );
+        navigator.serviceWorker.register('sw.js').catch(()=>{});
       }
     };
   </script>
