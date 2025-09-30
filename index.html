@@ -288,61 +288,135 @@
       };
 
       const exportXLSX = async () => {
+        const wb = XLSX.utils.book_new();
+
+        // ===== Aba "Lançamentos" com filtros e colunas ocultas =====
+        const toDateObj = (pt) => {
+          const m = String(pt || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+          if (!m) return null;
+          const dd = Number(m[1]), mm = Number(m[2]) - 1, yyyy = Number(m[3]);
+          return new Date(yyyy, mm, dd); // Excel vai reconhecer como data
+        };
+
+        const parseParcelaParts = (s) => {
+          const m = String(s || '').match(/(\d+)\s*\/\s*(\d+)/);
+          return m ? { num: Number(m[1]), tot: Number(m[2]) } : { num: null, tot: null };
+        };
+
+        const rows = expenses.map(e => {
+          const { num, tot } = parseParcelaParts(e.parcela);
+          return {
+            Data: toDateObj(e.date) || e.date || '',
+            Descrição: e.description || '',
+            Valor: Number(e.amount || 0),
+            Tipo: e.type || '',
+            Divisão: e.split || '',
+            Origem: e.paymentSource || '',
+            'Pago por': e.paidBy || '',
+            Parcela: e.parcela || '',
+            'Parcela Nº (oculto)': num,                      // <-- ajuda p/ ordenar
+            'Parcela Total (oculto)': tot,                     // <-- ajuda p/ ordenar
+            'Parcelado? (ordem oculta)': num != null ? 1 : 0, // 0=normal, 1=parcelado
+          };
+        });
+
+        // cabeçalhos na ordem desejada
+        const headers = [
+          'Data','Descrição','Valor','Tipo','Divisão','Origem','Pago por','Parcela',
+          'Parcela Nº (oculto)','Parcela Total (oculto)','Parcelado? (ordem oculta)'
+        ];
+
+        // cria a planilha (Data como Date real)
+        const ws1 = XLSX.utils.json_to_sheet(rows, { header: headers, cellDates: true });
+
+        // formata Valor como moeda
+        const range1 = XLSX.utils.decode_range(ws1['!ref'] || 'A1:A1');
+        const valorColIndex = headers.indexOf('Valor');
+        for (let R = 1; R <= range1.e.r; R++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: valorColIndex });
+          const cell = ws1[addr];
+          if (cell && typeof cell.v === 'number') { cell.t = 'n'; cell.z = 'R$ #,##0.00'; }
+        }
+
+        // formata Data como dd/mm/aaaa
+        const dataColIndex = headers.indexOf('Data');
+        for (let R = 1; R <= range1.e.r; R++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: dataColIndex });
+          const cell = ws1[addr];
+          if (cell && cell.v) { cell.z = 'dd/mm/yyyy'; }
+        }
+
+        // aplica AutoFilter no intervalo inteiro (cabeçalho + dados)
+        ws1['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range1.e.r, c: headers.length - 1 } }) };
+
+        // larguras e ocultação de colunas
+        ws1['!cols'] = [
+          { wch: 12 }, // Data
+          { wch: 42 }, // Descrição
+          { wch: 12 }, // Valor
+          { wch: 10 }, // Tipo
+          { wch: 12 }, // Divisão
+          { wch: 28 }, // Origem
+          { wch: 12 }, // Pago por
+          { wch: 10 }, // Parcela
+          { hidden: true }, // Parcela Nº (oculto)
+          { hidden: true }, // Parcela Total (oculto)
+          { hidden: true }, // Parcelado? (ordem oculta)
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws1, 'Lancamentos');
+
+
+        // resumo (usa memos mais abaixo)
+        const resumo = [
+          ['Usuário', user],
+          ['Escopo exibido', scope],
+          ['Parte do Guilherme (escopo)', partsScoped.g],
+          ['Parte da Thais (escopo)',      partsScoped.t],
+          ['Dif. de gastos (escopo)', difGastos],
+          ['Se eu quitar tudo (escopo), recebo de ' + otherUser, valorDevolverSePagarTudo],
+          [],
+          ['Cartões - Total (geral)', cardTotals.grandTotal],
+          ['Cartão Guilherme 2581', cardTotals.guilhermeCardTotal],
+          ['Cartão Thais 1009', cardTotals.thaisCardTotal],
+          ['Cartão Digital 7292', cardTotals.digitalCardTotal],
+          [],
+          ['Pagamentos feitos por Guilherme (Pix/Boleto/Ajuste)', gPaid],
+          ['Pagamentos feitos por Thais (Pix/Boleto/Ajuste)', tPaid],
+          ['Saldo real para ' + user, saldoUsuario],
+        ];
+        const ws2 = XLSX.utils.aoa_to_sheet(resumo);
+        [3,4,5,6,8,9,10,11,13,14,15].forEach(r => {
+          const addr = `B${r}`; if (ws2[addr]) { ws2[addr].t='n'; ws2[addr].z='R$ #,##0.00'; }
+        });
+        XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
+
+        const filename = `meu-acerto-${user.toLowerCase()}-${new Date().toISOString().slice(0,10)}.xlsx`;
+        
         try {
-          const wb = XLSX.utils.book_new();
-
-          // sheet lançamentos
-          const rows = expenses.map(e => ({
-            ID: e.id||'', Data: e.date||'', Descrição: e.description||'',
-            Valor: Number(e.amount||0), Tipo: e.type||'', Divisão: e.split||'',
-            Origem: e.paymentSource||'', 'Pago por': e.paidBy||'', Parcela: e.parcela||'',
-          }));
-          const ws1 = XLSX.utils.json_to_sheet(rows, { header: Object.keys(rows[0] || {'Sem lançamentos':''}) });
-          const r1 = XLSX.utils.decode_range(ws1['!ref'] || 'A1:A1');
-          for (let R=1; R<=r1.e.r; R++) {
-            const addr = XLSX.utils.encode_cell({r:R, c:3});
-            if (ws1[addr] && typeof ws1[addr].v === 'number') { ws1[addr].t='n'; ws1[addr].z = 'R$ #,##0.00'; }
-          }
-          XLSX.utils.book_append_sheet(wb, ws1, 'Lancamentos');
-
-          // resumo (usa memos mais abaixo)
-          const resumo = [
-            ['Usuário', user],
-            ['Escopo exibido', scope],
-            ['Minha parte (escopo)', minhaParteFatura],
-            ['Parte do outro (escopo)', parteDoOutroFatura],
-            ['Dif. de gastos (escopo)', difGastos],
-            ['Se eu quitar tudo (escopo), recebo de '+otherUser, valorDevolverSePagarTudo],
-            [],
-            ['Cartões - Total (geral)', cardTotals.grandTotal],
-            ['Cartão Guilherme 2581', cardTotals.guilhermeCardTotal],
-            ['Cartão Thais 1009', cardTotals.thaisCardTotal],
-            ['Cartão Digital 7292', cardTotals.digitalCardTotal],
-            [],
-            ['Pagamentos feitos por Guilherme (Pix/Boleto/Ajuste)', gPaid],
-            ['Pagamentos feitos por Thais (Pix/Boleto/Ajuste)', tPaid],
-            ['Saldo real para '+user, saldoUsuario],
-          ];
-          const ws2 = XLSX.utils.aoa_to_sheet(resumo);
-          [3,4,5,6,8,9,10,11,13,14,15].forEach(r => {
-            const addr = `B${r}`; if (ws2[addr]) { ws2[addr].t='n'; ws2[addr].z='R$ #,##0.00'; }
-          });
-          XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
-
-          const filename = `meu-acerto-${user.toLowerCase()}-${new Date().toISOString().slice(0,10)}.xlsx`;
-          const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-          const blob = new Blob([wbout], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-
-          if (navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:blob.type})] })) {
-            const file = new File([blob], filename, { type: blob.type });
-            await navigator.share({ files:[file], title:'Relatório Meu Acerto' });
+          // 1) Download direto (mais compatível em PWA/Android/iOS/desktop)
+          if (XLSX && XLSX.writeFileXLSX) {
+            XLSX.writeFileXLSX(wb, filename);
           } else {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = filename;
-            document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+            XLSX.writeFile(wb, filename);
           }
+          return; // sucesso
         } catch (err) {
-          console.error(err); alert('Falha ao exportar.');
+          console.warn('writeFile falhou, tentando ObjectURL:', err);
+        }
+
+        try {
+          // 2) Fallback final: ObjectURL
+          const wbArray = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+          const blob = new Blob([wbArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; a.rel = 'noopener';
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+        } catch (finalErr) {
+          console.error('Export error:', finalErr);
+          alert('Falha ao exportar.'); // só aparece se TUDO falhar
         }
       };
 
