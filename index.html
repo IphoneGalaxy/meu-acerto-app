@@ -155,6 +155,7 @@
       const [fSplit, setFSplit] = useState('Dividido');
       const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
       const [salvando, setSalvando] = useState(false);
+      const [editingId, setEditingId] = useState(null); // id do lançamento em edição (ou null)
 
       const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
       const theme = user === 'Thais'
@@ -213,12 +214,38 @@
       }, [installmentPlans, expenses, db, expensesColRef]);
 
       /* ===== ações ===== */
+      const openEdit = (e) => {
+        setEditingId(e.id);
+        setFDesc(e.description || '');
+        setFValor(String(e.amount ?? '').replace('.', ',')); // campo valor no padrão BR
+        setFData(e.date || new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
+        setFTipo(e.type || 'Cartão');
+        setFSplit(e.split || 'Dividido');
+        setFFonte(
+          e.type === 'Cartão'
+            ? (e.paymentSource || (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'))
+            : e.type
+        );
+        setIsAddOpen(true);
+      };
+
+      const deleteExpense = async (e) => {
+        if (!e.id) { alert('Lançamento sem ID.'); return; }
+        if (!confirm('Excluir este lançamento?')) return;
+        try {
+          await expensesColRef.doc(e.id).delete();
+        } catch (err) {
+          console.error(err);
+          alert('Falha ao excluir.');
+        }
+      };
+      
       const salvarLancamento = async () => {
         const val = parseMoney(fValor);
         if (!fDesc || !Number.isFinite(val)) { alert('Informe descrição e valor válido.'); return; }
         setSalvando(true);
         try {
-          await expensesColRef.add({
+          const payload = {
             description: fDesc,
             amount: val,
             date: fData,
@@ -227,7 +254,15 @@
             paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,
             paidBy: fTipo === 'Cartão' ? 'Cartão' : user,
             parcela: null
-          });
+          };
+      
+          if (editingId) {
+            await expensesColRef.doc(editingId).update(payload);
+            setEditingId(null);
+          } else {
+            await expensesColRef.add(payload);
+          }
+      
           setIsAddOpen(false);
           setFDesc(''); setFValor('');
         } catch (e) {
@@ -607,30 +642,68 @@
               {filteredAndSortedExpenses.map(expense => {
                 const splitCan = canonicalSplit(expense.split);
                 return (
-                  <div key={expense.id}
-                       className={`flex flex-wrap items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
-                         splitCan==='Guilherme' ? 'border-indigo-500' : splitCan==='Thais' ? 'border-pink-500' : 'border-transparent'
-                       }`}>
-                    <div className="flex-grow">
-                      <p className="font-semibold">{expense.description}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <div
+                    key={expense.id}
+                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2
+                                rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
+                      splitCan==='Guilherme' ? 'border-indigo-500'
+                        : splitCan==='Thais' ? 'border-pink-500'
+                        : 'border-transparent'
+                    }`}
+                  >
+                    {/* COLUNA ESQUERDA (texto) */}
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">{expense.description}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                         {expense.date} {expense.parcela ? `• ${expense.parcela}` : ''} • {expense.type}
                       </p>
                     </div>
-                    <div className="text-right flex-shrink-0 flex items-center gap-2">
+
+                    {/* COLUNA DIREITA (valor + ícones SEM QUEBRAR) */}
+                    <div className="flex items-center justify-end gap-1 sm:gap-2 whitespace-nowrap">
+                      {/* chips continuam escondidos no mobile */}
                       {expense.type !== 'Cartão' && (
-                        <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 whitespace-nowrap">
+                        <span className="hidden sm:inline text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600">
                           Pago por: {expense.paidBy}
                         </span>
                       )}
                       {expense.type === 'Cartão' && (
-                        <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 whitespace-nowrap">
+                        <span className="hidden sm:inline text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600">
                           {(expense.paymentSource||'').includes('7292') ? 'Cartão Digital' : (expense.paymentSource || 'Cartão')}
                         </span>
                       )}
+
+                      {/* valor */}
                       <p className={`font-semibold text-base sm:text-lg ${expense.amount < 0 ? 'text-emerald-500' : ''}`}>
                         {formatBRL(expense.amount)}
                       </p>
+
+                      {/* editar */}
+                      <button
+                        onClick={() => openEdit(expense)}
+                        className="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 ml-1 sm:ml-2"
+                        aria-label="Editar lançamento" title="Editar lançamento"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                          <path d="M12 20h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"
+                                stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+
+                      {/* lixeira */}
+                      <button
+                        onClick={() => deleteExpense(expense)}
+                        className="p-2 rounded-lg hover:bg-red-50 text-red-600 dark:hover:bg-red-900/30"
+                        aria-label="Excluir lançamento" title="Excluir lançamento"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                          <path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/>
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2"/>
+                          <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 );
@@ -643,7 +716,9 @@
 
           <Modal isOpen={isAddOpen} onClose={()=>setIsAddOpen(false)}>
             <div className="p-5 space-y-3">
-              <h2 id="modal-title" className="text-lg font-semibold">Novo lançamento</h2>
+              <h2 id="modal-title" className="text-lg font-semibold">
+                {editingId ? 'Editar lançamento' : 'Novo lançamento'}
+              </h2>
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Descrição" value={fDesc} onChange={e=>setFDesc(e.target.value)} />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Valor (ex: 123,45)" inputMode="decimal" value={fValor} onChange={e=>setFValor(e.target.value)} />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="dd/mm/aaaa" value={fData} onChange={e=>setFData(e.target.value)} />
@@ -663,8 +738,19 @@
                 </select>
               )}
               <div className="flex justify-end gap-2 pt-2">
-                <button onClick={()=>setIsAddOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">Cancelar</button>
-                <button onClick={salvarLancamento} disabled={salvando} className={`px-4 py-2 rounded-lg text-white ${theme.bg} ${theme.hover}`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+                <button
+                  onClick={() => { setIsAddOpen(false); setEditingId(null); }}
+                  className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={salvarLancamento}
+                  disabled={salvando}
+                  className={`px-4 py-2 rounded-lg text-white ${theme.bg} ${theme.hover}`}
+                >
+                  {salvando ? (editingId ? 'Atualizando...' : 'Salvando...') : (editingId ? 'Atualizar' : 'Salvar')}
+                </button>
               </div>
             </div>
           </Modal>
