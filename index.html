@@ -154,6 +154,7 @@
       const [fTipo, setFTipo] = useState('Cartão');
       const [fSplit, setFSplit] = useState('Dividido');
       const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
+      const [fParcela, setFParcela] = useState('');
       const [salvando, setSalvando] = useState(false);
       const [editingId, setEditingId] = useState(null); // id do lançamento em edição (ou null)
 
@@ -226,6 +227,7 @@
             ? (e.paymentSource || (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'))
             : e.type
         );
+        setFParcela(e.parcela || '');
         setIsAddOpen(true);
       };
 
@@ -240,12 +242,36 @@
         }
       };
       
+      const normalizeParcelaInput = (s) => {
+        let p = String(s || '').trim();
+        if (!p) return '';                           // vazio = manter no update
+        if (/^\d+\s*\/\s*\d+$/.test(p)) {
+          const [a,b] = p.split('/').map(x => Number(x.trim()));
+          if (a > 0 && b > 0 && a <= b) return `${a}/${b}`;
+          return ''; // inválido
+        }
+        const m = p.match(/(\d+)\D+(\d+)/);
+        if (m) {
+          const a = Number(m[1]), b = Number(m[2]);
+          if (a > 0 && b > 0 && a <= b) return `${a}/${b}`;
+        }
+        return '';
+      };
+
       const salvarLancamento = async () => {
         const val = parseMoney(fValor);
         if (!fDesc || !Number.isFinite(val)) { alert('Informe descrição e valor válido.'); return; }
+
+        // valida parcela digitada (se houver)
+        const parcelaNorm = normalizeParcelaInput(fParcela);
+        if (fParcela && !parcelaNorm) {
+          alert('Parcela inválida. Use o formato 2/12.');
+          return;
+        }
+
         setSalvando(true);
         try {
-          const payload = {
+          const payloadBase = {
             description: fDesc,
             amount: val,
             date: fData,
@@ -253,18 +279,21 @@
             type: fTipo,
             paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,
             paidBy: fTipo === 'Cartão' ? 'Cartão' : user,
-            parcela: null
           };
-      
+
           if (editingId) {
+            // UPDATE: só altera 'parcela' se o usuário preencheu o campo
+            const payload = { ...payloadBase };
+            if (fParcela !== '') payload.parcela = parcelaNorm || null; // vazio mantém; "apagar" = limpar
             await expensesColRef.doc(editingId).update(payload);
             setEditingId(null);
           } else {
-            await expensesColRef.add(payload);
+            // ADD: define parcela (ou null se não informar)
+            await expensesColRef.add({ ...payloadBase, parcela: parcelaNorm || null });
           }
-      
+
           setIsAddOpen(false);
-          setFDesc(''); setFValor('');
+          setFDesc(''); setFValor(''); setFParcela('');
         } catch (e) {
           console.error(e); alert('Falha ao salvar.');
         } finally {
@@ -796,6 +825,16 @@
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Descrição" value={fDesc} onChange={e=>setFDesc(e.target.value)} />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="Valor (ex: 123,45)" inputMode="decimal" value={fValor} onChange={e=>setFValor(e.target.value)} />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" placeholder="dd/mm/aaaa" value={fData} onChange={e=>setFData(e.target.value)} />
+              
+              {fTipo === 'Cartão' && (
+                <input
+                  className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none"
+                  placeholder="Parcela (ex: 2/12) — deixe em branco p/ manter"
+                  value={fParcela}
+                  onChange={e => setFParcela(e.target.value)}
+                />
+              )}
+
               <div className="flex gap-2">
                 <select className="flex-1 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none" value={fTipo} onChange={e=>setFTipo(e.target.value)}>
                   <option>Cartão</option><option>Pix</option><option>Boleto</option><option>Ajuste</option>
@@ -813,7 +852,7 @@
               )}
               <div className="flex justify-end gap-2 pt-2">
                 <button
-                  onClick={() => { setIsAddOpen(false); setEditingId(null); }}
+                  onClick={() => { setIsAddOpen(false); setEditingId(null); setFParcela(''); }}
                   className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700"
                 >
                   Cancelar
