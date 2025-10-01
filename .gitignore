@@ -1,34 +1,81 @@
-# Arquivos do sistema operacional
+# =========================
+# SO / Sistema Operacional
+# =========================
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Icon?
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Dependências (npm/yarn/pnpm)
+# =========================
+# Dependências / Gerenciadores
+# =========================
 node_modules/
+.npm/
+.pnpm-store/
+.bun/
 
-# Builds
+# =========================
+# Builds / Artefatos
+# =========================
 dist/
 build/
+.out/
+.next/
+.svelte-kit/
+.parcel-cache/
+.cache/
+.cache-loader/
+.tmp/
+temp/
 
-# Variáveis de ambiente
-.env
-.env.local
-
-# Logs e cache
+# =========================
+# Logs / Debug
+# =========================
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-.cache/
-.tmp/
+bun-debug.log*
 
+# =========================
+# Ambiente (.env)
+# =========================
+# Ignore todas as variações de env,
+# mas mantenha um exemplo versionado:
+.env*
+!.env.example
+
+# =========================
 # Editor/IDE
+# =========================
 .vscode/
 .idea/
-
-# Tests/coverage
-coverage/
-
-# Others
 *.swp
 *.swo
+
+# =========================
+# Testes / Cobertura
+# =========================
+coverage/
+*.pid
+*.seed
+
+# =========================
+# Arquivos gerados / pacotes
+# =========================
+*.tgz
+*.tar
+*.zip
+
+# =========================
+# Certs / Keys (nunca commitar)
+# =========================
+*.pem
+*.key
+*.p12
+*.pfx
