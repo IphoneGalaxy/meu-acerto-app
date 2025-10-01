@@ -156,7 +156,17 @@
       const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
       const [fParcela, setFParcela] = useState('');
       const [salvando, setSalvando] = useState(false);
-      const [editingId, setEditingId] = useState(null); // id do lançamento em edição (ou null)
+      const [editingId, setEditingId] = useState(null);
+      const [ajusteValor, setAjusteValor] = useState('');
+      const [ajusteDesc, setAjusteDesc]   = useState('');
+
+      // delete
+      const [isDelOpen, setDelOpen] = useState(false);
+      const [delTarget, setDelTarget] = useState(null);
+      const [deleting, setDeleting] = useState(false);
+
+      const openDelete = (exp) => { setDelTarget(exp); setDelOpen(true); };
+      const closeDelete = () => { setDelOpen(false); setDelTarget(null); };
 
       const otherUser = user === 'Guilherme' ? 'Thais' : 'Guilherme';
       const theme = user === 'Thais'
@@ -184,6 +194,7 @@
         for (const plan of installmentPlans) {
           if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
 
+          const deletedSet = new Set(plan.deletedParcels || []);
           const [dd, mm, yyyy] = String(plan.startDate).split('/');
           const start = new Date(yyyy, mm-1, dd);
           const per = round2(plan.totalAmount / plan.numberOfInstallments);
@@ -193,14 +204,17 @@
             const d = new Date(start.getFullYear(), start.getMonth()+i, start.getDate(), 12);
             if (d <= today) {
               const num = i+1;
-              const exists = expenses.some(e => e.installmentPlanId===plan.id && e.parcela===`${num}/${plan.numberOfInstallments}`);
+              const parcelaKey = `${num}/${plan.numberOfInstallments}`;
+              if (deletedSet.has(parcelaKey)) continue;
+
+              const exists = expenses.some(e => e.installmentPlanId===plan.id && e.parcela===parcelaKey);
               if (!exists) {
                 batch.set(expensesColRef.doc(), {
                   installmentPlanId: plan.id,
                   description: plan.description,
                   amount: num === plan.numberOfInstallments ? last : per,
                   date: d.toLocaleDateString('pt-PT', { timeZone:'UTC'}),
-                  parcela: `${num}/${plan.numberOfInstallments}`,
+                  parcela: parcelaKey,
                   split: plan.split,
                   type: plan.type,
                   paymentSource: plan.paymentSource,
@@ -231,14 +245,33 @@
         setIsAddOpen(true);
       };
 
-      const deleteExpense = async (e) => {
-        if (!e.id) { alert('Lançamento sem ID.'); return; }
-        if (!confirm('Excluir este lançamento?')) return;
+      const doDelete = async () => {
+        if (!delTarget) return;
+        setDeleting(true);
         try {
-          await expensesColRef.doc(e.id).delete();
-        } catch (err) {
-          console.error(err);
+          const expRef = expensesColRef.doc(delTarget.id);
+
+          if (delTarget.installmentPlanId && delTarget.parcela) {
+            // Apaga de vez uma parcela gerada por plano
+            const planRef = plansColRef.doc(delTarget.installmentPlanId);
+            await db.runTransaction(async (t) => {
+              const ps = await t.get(planRef);
+              const cur = (ps.data()?.deletedParcels || []);
+              const key = String(delTarget.parcela);
+              const next = cur.includes(key) ? cur : [...cur, key];
+              t.update(planRef, { deletedParcels: next });
+              t.delete(expRef);
+            });
+          } else {
+            // Lançamento normal
+            await expRef.delete();
+          }
+          closeDelete();
+        } catch (e) {
+          console.error(e);
           alert('Falha ao excluir.');
+        } finally {
+          setDeleting(false);
         }
       };
       
@@ -298,6 +331,28 @@
           console.error(e); alert('Falha ao salvar.');
         } finally {
           setSalvando(false);
+        }
+      };
+
+      const adicionarAjusteRapido = async () => {
+        if (user !== 'Thais') { alert('Ajuste só no painel da Thais.'); return; }
+        const val = parseMoney(ajusteValor);
+        if (!(val > 0)) { alert('Informe um valor POSITIVO para o ajuste.'); return; }
+
+        try {
+          await expensesColRef.add({
+            description: (ajusteDesc?.trim() || 'Ajuste (Thais → Guilherme)'),
+            amount: val,
+            date: new Date().toLocaleDateString('pt-PT', { timeZone:'UTC' }),
+            split: 'Thais',               // não entra no rateio (tipo Ajuste é ignorado em partsGeral)
+            type: 'Ajuste',
+            paymentSource: 'Ajuste',
+            paidBy: 'Thais',
+            parcela: null
+          });
+          setAjusteValor(''); setAjusteDesc('');
+        } catch (e) {
+          console.error(e); alert('Falha ao registrar ajuste.');
         }
       };
 
@@ -558,7 +613,8 @@
             if (src.includes('7292')) return true; // digital visível p/ ambos
             return user === 'Guilherme' ? src.includes('2581') : src.includes('1009');
           }
-          return e.paidBy === user || e.type === 'Ajuste';
+           if (e.type === 'Ajuste' && e.paidBy === 'Thais') return true;
+          return e.paidBy === user;
         });
 
         let filtered = userVisible;
@@ -567,6 +623,9 @@
           case 'Parcelados': filtered = userVisible.filter(e => !!e.parcela); break;
           case 'Pix':        filtered = userVisible.filter(e => e.type==='Pix'); break;
           case 'Boleto':     filtered = userVisible.filter(e => e.type==='Boleto'); break;
+          case 'Ajustes':
+            filtered = userVisible.filter(e => e.type === 'Ajuste');
+            break;
           default:           filtered = userVisible;
         }
 
@@ -623,6 +682,42 @@
         return { gPaid:round2(g), tPaid:round2(t) };
       }, [expenses]);
 
+      // (a) Responsabilidade total de cada um no GERAL (Cartão + Pix + Boleto), sem Ajuste
+      const partsGeral = useMemo(() => {
+        let g = 0, t = 0;
+        const base = expenses.filter(e => e.type !== 'Ajuste');
+        for (const e of base) {
+          const v = Number(e.amount || 0);
+          const s = canonicalSplit(e.split);
+          if (s === 'Dividido') { g += v/2; t += v/2; }
+          else if (s === 'Guilherme') g += v;
+          else if (s === 'Thais') t += v;
+        }
+        return { g: round2(g), t: round2(t) };
+      }, [expenses]);
+
+      // (b) O que a Thais já pagou em Pix/Boleto (dinheiro real que saiu dela)
+      const paidPBThais = useMemo(() => round2(
+        expenses
+          .filter(e => e.type === 'Pix' || e.type === 'Boleto')
+          .filter(e => e.paidBy === 'Thais')
+          .reduce((s, e) => s + Number(e.amount || 0), 0)
+      ), [expenses]);
+
+      // (c) Ajustes que a Thais já te pagou (só Thais lança, valor > 0)
+      const ajustesThais = useMemo(() => round2(
+        expenses
+          .filter(e => e.type === 'Ajuste' && e.paidBy === 'Thais')
+          .reduce((s, e) => s + Number(e.amount || 0), 0)
+      ), [expenses]);
+
+      // (d) Saldo devedor da Thais com o Guilherme = tudo que é parte da Thais - (o que ela já pagou em Pix/Boleto) - (o que ela já te devolveu em Ajuste)
+      const saldoDevedorThais = useMemo(() => {
+        const raw = (partsGeral.t - paidPBThais - ajustesThais);
+        return round2(raw);
+      }, [partsGeral, paidPBThais, ajustesThais]);
+
+
       const minhaParteFatura = user==='Guilherme' ? partsScoped.g : partsScoped.t;
       const parteDoOutroFatura = user==='Guilherme' ? partsScoped.t : partsScoped.g;
       const valorDevolverSePagarTudo = parteDoOutroFatura;
@@ -658,7 +753,7 @@
               className="absolute top-0 right-0 p-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600"
               aria-label="Trocar de usuário" title="Trocar de usuário">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M10 6H6a2 2_0 0 0-2 2v8a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M14 16l4-4-4-4M8 12h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
@@ -676,20 +771,101 @@
             </div>
 
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-3">
-              <h3 className="font-semibold text-slate-600 dark:text-slate-400">Saldo de Acerto Real</h3>
-              <p className="text-slate-500 dark:text-slate-400">{saldoLabel}</p>
+              <h3 className="font-semibold text-slate-600 dark:text-slate-400">Saldo de Acerto (Filtro)</h3>
+               <p className="text-slate-500 dark:text-slate-400">{saldoLabel}</p>
               <p className={`${saldoCor} text-3xl font-extrabold`}>{formatBRL(saldoUsuario)}</p>
               <hr className="border-slate-200 dark:border-slate-700" />
               <div className="text-sm">
-                <p>Pagamentos/Ajustes feitos por você: <span className="font-semibold">{formatBRL(user==='Guilherme' ? gPaid : tPaid)}</span></p>
-                <p>Pagamentos/Ajustes feitos por {otherUser}: <span className="font-semibold">{formatBRL(user==='Guilherme' ? tPaid : gPaid)}</span></p>
+                 <p>Pagamentos (Pix/Boleto/Ajuste) por você: <span className="font-semibold">{formatBRL(user === 'Guilherme' ? gPaid : tPaid)}</span></p>
+                <p>Pagamentos por {otherUser}: <span className="font-semibold">{formatBRL(user === 'Guilherme' ? tPaid : gPaid)}</span></p>
               </div>
-              <button onClick={exportXLSX}
+               <button onClick={exportXLSX}
                 className={`w-full mt-2 px-4 py-2 rounded-lg font-semibold text-white ${theme.bg} ${theme.hover}`}>
                 Exportar Relatório
               </button>
             </div>
           </div>
+          
+          {user === 'Guilherme' && (
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-3 mb-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-600 dark:text-slate-400">
+                    Ajustes (Thais → Guilherme) — visualização
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Quanto falta a Thais te devolver (geral) e quanto já depositou em Ajustes.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">A receber de Thais (geral)</p>
+                  <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    {formatBRL(Math.max(0, saldoDevedorThais))}
+                  </p>
+                  {saldoDevedorThais < 0 && (
+                    <p className="text-xs text-emerald-600">
+                      Você já recebeu {formatBRL(Math.abs(saldoDevedorThais))} além do devido.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                Devido pela Thais (geral): <span className="font-semibold">{formatBRL(partsGeral.t)}</span> •
+                Pago por Thais (Pix/Boleto): <span className="font-semibold">{formatBRL(paidPBThais)}</span> •
+                Ajustes já pagos: <span className="font-semibold">{formatBRL(ajustesThais)}</span>
+              </div>
+            </div>
+          )}
+
+          {user === 'Thais' && (
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-4 mb-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-600 dark:text-slate-400">Ajustes (Thais → Guilherme)</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Lançe aqui os valores que você pagou ao Guilherme. Isso reduz seu saldo devedor geral.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Saldo devedor (geral)</p>
+                  <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                    {formatBRL(saldoDevedorThais)}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Já pago em ajustes: <span className="font-semibold">{formatBRL(ajustesThais)}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[160px_1fr_auto]">
+                <input
+                  className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none"
+                  placeholder="Valor (ex: 200,00)"
+                  inputMode="decimal"
+                  value={ajusteValor}
+                  onChange={(e)=>setAjusteValor(e.target.value)}
+                />
+                <input
+                  className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none"
+                  placeholder="Descrição (opcional)"
+                  value={ajusteDesc}
+                  onChange={(e)=>setAjusteDesc(e.target.value)}
+                />
+                <button
+                  onClick={adicionarAjusteRapido}
+                  className="px-4 py-2 rounded-lg font-semibold text-white bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Registrar ajuste
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Sua parte total (geral): <span className="font-semibold">{formatBRL(partsGeral.t)}</span> •
+                Pagos por você (Pix/Boleto): <span className="font-semibold">{formatBRL(paidPBThais)}</span>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-4 mb-6">
             <h3 className="font-semibold text-slate-600 dark:text-slate-400">Resumo da Fatura (Gastos)</h3>
@@ -734,9 +910,11 @@
 
           <div className="bg-white dark:bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-md">
             <div className="flex flex-wrap gap-2 mb-3">
-              {['Todos','Cartão','Parcelados','Pix','Boleto'].map(opt => (
+              {['Todos','Cartão','Parcelados','Pix','Boleto','Ajustes'].map(opt => (
                 <button key={opt} onClick={()=>setFilter(opt)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${filter===opt ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}`}>
+                  className={`px-3 py-1.5 rounded-full text-sm font-semibold transition ${
+                    filter===opt ? `${theme.bg} text-white shadow` : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'
+                  }`}>
                   {opt}
                 </button>
               ))}
@@ -796,9 +974,10 @@
 
                       {/* lixeira */}
                       <button
-                        onClick={() => deleteExpense(expense)}
-                        className="p-2 rounded-lg hover:bg-red-50 text-red-600 dark:hover:bg-red-900/30"
-                        aria-label="Excluir lançamento" title="Excluir lançamento"
+                        onClick={(e)=>{ e.stopPropagation(); openDelete(expense); }}
+                        className="p-1.5 rounded hover:bg-red-500/10"
+                        aria-label="Excluir lançamento"
+                        title="Excluir"
                       >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                           <path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -886,6 +1065,33 @@
               <div className="flex gap-2 justify-end">
                 <button onClick={()=>setIsClearModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">Cancelar</button>
                 <button onClick={confirmAndClearAll} className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white">Apagar</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal isOpen={isDelOpen} onClose={closeDelete}>
+            <div className="p-5">
+              <h2 id="modal-title" className="text-lg font-semibold mb-2 text-red-600">
+                Excluir lançamento?
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+                {delTarget?.description} — {delTarget ? formatBRL(delTarget.amount) : ''}
+              </p>
+
+              {delTarget?.installmentPlanId && delTarget?.parcela && (
+                <div className="text-xs mb-4 p-2 rounded bg-amber-100/60 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                  Este lançamento é <b>parcela ({delTarget.parcela})</b> de um plano. Ele não será recriado novamente.
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <button onClick={closeDelete} className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-700">
+                  Cancelar
+                </button>
+                <button onClick={doDelete} disabled={deleting}
+                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white">
+                  {deleting ? 'Excluindo...' : 'Excluir'}
+                </button>
               </div>
             </div>
           </Modal>
