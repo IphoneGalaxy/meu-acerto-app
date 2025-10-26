@@ -52,7 +52,13 @@
       if (n.includes('thais')) return 'Thais';
       return 'Dividido';
     };
-    
+
+    const shouldIgnoreDescription = (s) => {
+      const n = norm(s).replace(/\s+/g, ' '); // normaliza acentos e espaços estranhos
+      // ignora “Inclusão de Pagamento” (com ou sem acento/“de”/espaços extras/linhas)
+      return n === 'inclusao de pagamento' || /\binclusao\b.*\bpagamento\b/.test(n);
+    };
+
     // (3) parseMoney mais robusto (casos “123,45-”)
     const parseMoney = (input) => {
       if (typeof input === 'number') return input;
@@ -91,10 +97,10 @@
     /* ================= UI Genéricos ================= */
     const Modal = ({ isOpen, onClose, children, titleId='modal-title' }) => {
       const contentRef = React.useRef(null);
-      
+
       // (2) Use useCallback for stable onClose reference
       const onCloseStable = React.useCallback(() => onClose?.(), [onClose]);
-    
+
       React.useEffect(() => {
         if (!isOpen) return;
         // Focus the first focusable element inside the modal when it opens
@@ -313,7 +319,7 @@
           setDeleting(false);
         }
       };
-      
+
       // Normalize installment input (e.g., '2 / 12' -> '2/12')
       const normalizeParcelaInput = (s) => {
         let p = String(s || '').trim();
@@ -337,9 +343,9 @@
       const salvarLancamento = async () => {
         const val = parseMoney(fValor); // Parse amount string
         // Basic validation
-        if (!fDesc || !Number.isFinite(val)) { 
+        if (!fDesc || !Number.isFinite(val)) {
           console.warn('Descrição ou valor inválido.'); // Avoid alert
-          return; 
+          return;
         }
 
         // Validate installment format if provided
@@ -367,7 +373,7 @@
             const payload = { ...payloadBase };
             // Only update 'parcela' if the input field was touched
             // Empty input '' means clear the parcela field (set to null)
-            if (fParcela !== '') payload.parcela = parcelaNorm || null; 
+            if (fParcela !== '') payload.parcela = parcelaNorm || null;
             await expensesColRef.doc(editingId).update(payload);
             setEditingId(null); // Reset editing state
           } else {
@@ -378,14 +384,14 @@
 
           // Reset form and close modal on success
           setIsAddOpen(false);
-          setFDesc(''); setFValor(''); setFParcela(''); 
+          setFDesc(''); setFValor(''); setFParcela('');
           // Reset default source/type after saving
           setFTipo('Cartão');
           setFFonte(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
           setFSplit('Dividido');
 
         } catch (e) {
-          console.error("Save error:", e); 
+          console.error("Save error:", e);
           // alert('Falha ao salvar.'); // Avoid alert
         } finally {
           setSalvando(false);
@@ -394,15 +400,15 @@
 
       // Add quick adjustment (Thais -> Guilherme)
       const adicionarAjusteRapido = async () => {
-        if (user !== 'Thais') { 
+        if (user !== 'Thais') {
           console.warn('Ajuste só pode ser lançado pela Thais.'); // Avoid alert
-          return; 
+          return;
         }
         const val = parseMoney(ajusteValor);
         // Adjustment must be positive
-        if (!(val > 0)) { 
+        if (!(val > 0)) {
           console.warn('Informe um valor POSITIVO para o ajuste.'); // Avoid alert
-          return; 
+          return;
         }
 
         try {
@@ -419,7 +425,7 @@
           // Reset adjustment form fields
           setAjusteValor(''); setAjusteDesc('');
         } catch (e) {
-          console.error("Adjustment error:", e); 
+          console.error("Adjustment error:", e);
           // alert('Falha ao registrar ajuste.'); // Avoid alert
         }
       };
@@ -478,8 +484,8 @@
             'Origem': e.paymentSource || '',
             'Pago por': e.paidBy || '',
             'Parcela': e.parcela || '',
-            'Parcela Nº (oculto)': num,                      // Hidden column for sorting
-            'Parcela Total (oculto)': tot,                    // Hidden column for sorting
+            'Parcela Nº (oculto)': num,                  // Hidden column for sorting
+            'Parcela Total (oculto)': tot,                  // Hidden column for sorting
             'Parcelado? (ordem oculta)': num != null ? 1 : 0, // Hidden column (0=not installment, 1=is installment)
           };
         });
@@ -495,14 +501,14 @@
 
         // Apply formatting and autofilter
         const range1 = XLSX.utils.decode_range(ws1['!ref'] || 'A1:A1');
-        
+
         // Format 'Valor' column as BRL currency
         const valorColIndex = headers.indexOf('Valor');
         if (valorColIndex > -1) {
           for (let R = 1; R <= range1.e.r; R++) { // Start from row 1 (data)
             const addr = XLSX.utils.encode_cell({ r: R, c: valorColIndex });
             const cell = ws1[addr];
-            if (cell && typeof cell.v === 'number') { 
+            if (cell && typeof cell.v === 'number') {
               cell.t = 'n'; // Ensure type is number
               cell.z = 'R$ #,##0.00'; // BRL format string
             }
@@ -514,9 +520,9 @@
         if (dataColIndex > -1) {
           for (let R = 1; R <= range1.e.r; R++) { // Start from row 1 (data)
             const addr = XLSX.utils.encode_cell({ r: R, c: dataColIndex });
-            const cell = ws1[addr]; 
+            const cell = ws1[addr];
             // Directly apply format; cellDates:true handles the value conversion
-            if (cell) cell.z = 'dd/mm/yyyy'; 
+            if (cell) cell.z = 'dd/mm/yyyy';
           }
         }
 
@@ -548,7 +554,7 @@
           ['Escopo exibido', scope], // Filter scope ('geral', 'cartao', 'pixboleto')
           [], // Spacer row
           ['Parte do Guilherme (escopo)', partsScoped.g],
-          ['Parte da Thais (escopo)',      partsScoped.t],
+          ['Parte da Thais (escopo)',     partsScoped.t],
           ['Dif. de gastos (escopo)', difGastos],
           [`Se ${user} quitar tudo (escopo), recebe de ${otherUser}`, valorDevolverSePagarTudo],
           [], // Spacer row
@@ -564,25 +570,25 @@
           ['Saldo Devedor Thais para Guilherme (geral, Cartão+Pix+Boleto)', saldoDevedorThais],
         ];
         const ws2 = XLSX.utils.aoa_to_sheet(resumo);
-        
+
         // Apply currency format to relevant summary rows (adjust indices if `resumo` changes)
-        const currencyRowsIndices = [3, 4, 5, 6, 8, 9, 10, 11, 13, 14, 16, 17]; 
+        const currencyRowsIndices = [3, 4, 5, 6, 8, 9, 10, 11, 13, 14, 16, 17];
         currencyRowsIndices.forEach(rowIndex => {
           const addr = `B${rowIndex + 1}`; // +1 because sheet rows are 1-based
-          if (ws2[addr] && typeof ws2[addr].v === 'number') { 
-            ws2[addr].t = 'n'; 
-            ws2[addr].z = 'R$ #,##0.00'; 
+          if (ws2[addr] && typeof ws2[addr].v === 'number') {
+            ws2[addr].t = 'n';
+            ws2[addr].z = 'R$ #,##0.00';
           }
         });
-        
+
         // Adjust column widths for summary sheet
-        ws2['!cols'] = [{ wch: 50 }, { wch: 15 }]; 
+        ws2['!cols'] = [{ wch: 50 }, { wch: 15 }];
 
         XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
 
         // Generate filename
         const filename = `meu-acerto-${user.toLowerCase()}-${new Date().toISOString().slice(0,10)}.xlsx`;
-        
+
         // Attempt download using different methods for compatibility
         try {
           // Method 1: Direct writeFileXLSX (preferred)
@@ -659,12 +665,13 @@
             }
             return ''; // Return empty string if no match found
           };
-          
+
           // Map row objects to the expected expense format
           const mapped = rows.map(row => {
             // Use 'pick' with various possible header names for each field
             const desc = pick(row, ['descricao','descrição','description']);
-            
+            if (shouldIgnoreDescription(desc)) return null; // pula essa linha
+
             // Prioritize BRL amount, then fall back to others
             const rawAmount = (() => {
               // Headers like "Valor (em R$)" normalize to "valoremr"
@@ -704,7 +711,7 @@
             const paidNorm = norm(rawPaidBy);
             const paidBy = type === 'Cartão' ? 'Cartão' : // Card payments are 'Cartão'
               paidNorm.includes('thais') ? 'Thais' : // Identify payer if provided
-              paidNorm.includes('guilherme') ? 'Guilherme' : 
+              paidNorm.includes('guilherme') ? 'Guilherme' :
               user; // Default to current user if not specified
 
             // Normalize Installment
@@ -716,14 +723,14 @@
           }).filter(Boolean); // Filter out null results from invalid rows
 
           // Show import confirmation modal if valid rows were found
-          if (mapped.length === 0) { 
+          if (mapped.length === 0) {
             console.warn('Não encontrei linhas válidas para importar.'); // Avoid alert
-            return; 
+            return;
           }
           setImportedExpenses(mapped);
           setImportModalOpen(true);
         } catch (e) {
-          console.error('File Upload/Parse Error:', e); 
+          console.error('File Upload/Parse Error:', e);
           // alert('Falha ao carregar ficheiro.'); // Avoid alert
         } finally {
           // Reset file input to allow re-uploading the same file
@@ -748,7 +755,7 @@
               canonicalSplit(ex.split) === canonicalSplit(imp.split) // Compare normalized split
             )
           );
-          
+
           // Add unique expenses to Firestore in batches
           const chunkSize = 450; // Firestore batch write limit is ~500
           for (let i = 0; i < unique.length; i += chunkSize) {
@@ -758,13 +765,13 @@
             await batch.commit(); // Commit the batch
           }
           // Clear import state and close modal on success
-          setImportedExpenses([]); 
+          setImportedExpenses([]);
           setImportModalOpen(false);
-        } catch (e) { 
-          console.error("Import execution error:", e); 
+        } catch (e) {
+          console.error("Import execution error:", e);
           // alert('Falha ao importar.'); // Avoid alert
-        } finally { 
-          setIsImporting(false); 
+        } finally {
+          setIsImporting(false);
         }
       };
 
@@ -773,7 +780,7 @@
       // Filter and sort expenses based on the current filter and user view
       const filteredAndSortedExpenses = useMemo(() => {
         const toDate = d => d ? new Date(d.split('/').reverse().join('-')) : new Date(0); // Helper to parse 'dd/mm/yyyy'
-        
+
         // Determine which expenses are visible to the current user
         const userVisible = expenses.filter(e => {
           if (e.type === 'Cartão') {
@@ -783,7 +790,7 @@
             return user === 'Guilherme' ? src.includes('2581') : src.includes('1009');
           }
           // Adjustments made by Thais are visible to both for calculation purposes
-          if (e.type === 'Ajuste' && e.paidBy === 'Thais') return true; 
+          if (e.type === 'Ajuste' && e.paidBy === 'Thais') return true;
           // Show Pix/Boleto based on who paid
           return e.paidBy === user;
         });
@@ -805,10 +812,10 @@
           // When 'Todos' filter is active, non-installments come before installments on the same day
           if (filter==='Todos') {
             const ap = !!a.parcela, bp = !!b.parcela;
-            if (ap !== bp) return ap ? 1 : -1; 
+            if (ap !== bp) return ap ? 1 : -1;
           }
           // Primary sort: newest date first
-          return bd - ad; 
+          return bd - ad;
         });
       }, [expenses, filter, user]); // Recalculate when expenses, filter, or user changes
 
@@ -827,9 +834,9 @@
         let g=0, t=0;
         const base = expenses.filter(e => e.type!=='Ajuste'); // Exclude adjustments from shared calculations
         // Filter expenses based on the selected scope
-        const src = scope==='geral' ? base : 
-                    scope==='cartao' ? base.filter(e=>e.type==='Cartão') : 
-                    base.filter(e=>e.type==='Pix'||e.type==='Boleto'); // 'pixboleto' scope
+        const src = scope==='geral' ? base :
+                      scope==='cartao' ? base.filter(e=>e.type==='Cartão') :
+                      base.filter(e=>e.type==='Pix'||e.type==='Boleto'); // 'pixboleto' scope
         // Calculate shares based on the 'split' field
         for (const e of src) {
           const v = Number(e.amount||0);
@@ -983,7 +990,7 @@
               </button>
             </div>
           </div>
-          
+
           {/* Adjustment Section (Visible to Guilherme for info, actionable for Thais) */}
           {user === 'Guilherme' && (
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-md space-y-3 mb-6">
@@ -1107,7 +1114,7 @@
               Importar Planilha
             </button>
             {/* Hidden file input triggered by the button above */}
-            <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.ods" onChange={handleFileUpload} /> 
+            <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.ods" onChange={handleFileUpload} />
             <button onClick={()=>setIsClearModalOpen(true)}
               className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg">
               Limpar Tudo
@@ -1132,15 +1139,15 @@
               {filteredAndSortedExpenses.map(expense => {
                 const splitCan = canonicalSplit(expense.split); // Normalized split for border color
                 return (
+                  // Grid layout for expense item: Description/Details | Amount/Actions
                   <div
                     key={expense.id}
-                    // Grid layout for expense item: Description/Details | Amount/Actions
                     className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 sm:p-3
-                                rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
-                      splitCan==='Guilherme' ? 'border-indigo-500' // Blue border for Guilherme's share
-                        : splitCan==='Thais' ? 'border-pink-500' // Pink border for Thais' share
-                        : 'border-transparent' // No border if split is 'Dividido'
-                    }`}
+                           rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
+                             splitCan==='Guilherme' ? 'border-indigo-500' // Blue border for Guilherme's share
+                               : splitCan==='Thais' ? 'border-pink-500' // Pink border for Thais' share
+                               : 'border-transparent' // No border if split is 'Dividido'
+                           }`}
                   >
                     {/* Left Column: Description and Details */}
                     <div className="min-w-0"> {/* Prevents text overflow issues */}
@@ -1160,9 +1167,9 @@
                       )}
                       {expense.type === 'Cartão' && (
                         <span className="hidden sm:inline text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-300">
-                          {(expense.paymentSource||'').includes('7292') ? 'Cartão Digital' 
-                            : (expense.paymentSource||'').includes('1009') ? 'Cartão Thais' 
-                            : (expense.paymentSource||'').includes('2581') ? 'Cartão Gui' 
+                          {(expense.paymentSource||'').includes('7292') ? 'Cartão Digital'
+                            : (expense.paymentSource||'').includes('1009') ? 'Cartão Thais'
+                            : (expense.paymentSource||'').includes('2581') ? 'Cartão Gui'
                             : 'Cartão'}
                         </span>
                       )}
@@ -1219,7 +1226,7 @@
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Descrição" value={fDesc} onChange={e=>setFDesc(e.target.value)} required />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Valor (ex: 123,45)" inputMode="decimal" value={fValor} onChange={e=>setFValor(e.target.value)} required />
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Data (dd/mm/aaaa)" value={fData} onChange={e=>setFData(e.target.value)} pattern="\d{2}/\d{2}/\d{4}" />
-              
+
               {/* Installment field (only for Card type) */}
               {fTipo === 'Cartão' && (
                 <input
@@ -1342,12 +1349,12 @@
           storageBucket: "meu-acerto-app.appspot.com",
           messagingSenderId: "326844075367",
           // (1) Correct appId format with colons
-          appId: "1:326844075367:web:0315e86713b1e0071f33c2" 
+          appId: "1:326844075367:web:0315e86713b1e0071f33c2"
         };
         try {
           // Initialize Firebase app if not already initialized
           if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-          
+
           // Get Firestore instance and enable offline persistence with tab synchronization
           const firestoreDb = firebase.firestore();
           firestoreDb.enablePersistence({ synchronizeTabs: true })
@@ -1357,8 +1364,8 @@
           // Firebase Authentication
           const auth = firebase.auth();
           // Listener for authentication state changes
-          const unsub = auth.onAuthStateChanged(user => setAuthReady(!!user)); 
-          
+          const unsub = auth.onAuthStateChanged(user => setAuthReady(!!user));
+
           // Sign in anonymously if not already signed in
           (async () => {
             try {
@@ -1375,7 +1382,7 @@
               setError(`Erro de autenticação: ${err.message}. Verifique a conexão e as configurações.`);
             }
           })();
-          
+
           // Cleanup listener on unmount
           return () => unsub();
         } catch (err) {
@@ -1385,13 +1392,13 @@
       }, []); // Run only once on mount
 
       // Handle user selection
-      const handleSelectUser = (u) => { 
-        setCurrentUser(u); 
+      const handleSelectUser = (u) => {
+        setCurrentUser(u);
         localStorage.setItem('meuAcertoUser', JSON.stringify(u)); // Persist selection
       };
       // Handle logout (clear user selection)
-      const handleLogout = () => { 
-        setCurrentUser(null); 
+      const handleLogout = () => {
+        setCurrentUser(null);
         localStorage.removeItem('meuAcertoUser'); // Clear persisted selection
       };
 
