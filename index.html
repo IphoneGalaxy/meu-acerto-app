@@ -659,7 +659,7 @@
           URL.revokeObjectURL(url); // Clean up
         } catch (finalErr) {
           console.error('XLSX Export Error (all methods failed):', finalErr);
-          // alert('Falha ao exportar.'); // Avoid alert
+          // alert('Falha ao exportar.'); // Avoid using alert
         }
       };
 
@@ -839,7 +839,7 @@
           setImportModalOpen(true);
         } catch (e) {
           console.error('File Upload/Parse Error:', e);
-          // alert('Falha ao carregar ficheiro.'); // Avoid alert
+          // alert('Falha ao carregar ficheiro.'); // Avoid using alert
         } finally {
           // Reset file input to allow re-uploading the same file
           if (event.target) event.target.value = '';
@@ -1463,14 +1463,16 @@
       useEffect(() => {
         // --- Use your Firebase config directly when deploying outside Canvas ---
         // Replace with your actual Firebase project config
+        // --- FIX: Use the actual config provided by the user ---
         const firebaseConfig = {
-          apiKey: "YOUR_API_KEY", // <-- Replace
-          authDomain: "YOUR_AUTH_DOMAIN", // <-- Replace
-          projectId: "YOUR_PROJECT_ID", // <-- Replace
-          storageBucket: "YOUR_STORAGE_BUCKET", // <-- Replace
-          messagingSenderId: "YOUR_MESSAGING_SENDER_ID", // <-- Replace
-          appId: "YOUR_APP_ID" // <-- Replace
+          apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
+          authDomain: "meu-acerto-app.firebaseapp.com",
+          projectId: "meu-acerto-app",
+          storageBucket: "meu-acerto-app.appspot.com", // Corrected format
+          messagingSenderId: "326844075367",
+          appId: "1:326844075367:web:0315e86713b1e0071f33c2"
         };
+        // --- END FIX ---
         // --- END Config ---
 
         try {
