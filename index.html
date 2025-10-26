@@ -63,23 +63,17 @@
     const parseMoney = (input) => {
         if (typeof input === 'number') return input;
         if (!input) return NaN;
-        let s = String(input).replace(/R\$\s?/gi,'').replace(/\s+/g,'').trim(); // Remove R$ and extra spaces
-        const parenNeg = /^\(.*\)$/.test(s);
-        const trailingNeg = /-$/.test(s);
-        if (parenNeg) s = s.replace(/[()]/g,'');
-        if (trailingNeg) s = s.slice(0, -1);
+        // Handle masked input like "1.234,56" or "-1.234,56"
+        let s = String(input).replace(/\s+/g,'').trim(); // Remove extra spaces
+        const negative = s.startsWith('-');
+        if (negative) s = s.substring(1); // Remove leading negative for parsing
 
-        let n;
-        // Check if it uses ',' as decimal separator (Brazilian/European style) - common in manually entered data
-        if (s.includes(',')) {
-            // Remove thousands separators '.', replace decimal ',' with '.'
-            n = parseFloat(s.replace(/\./g,'').replace(',','.'));
-        } else {
-            // Assume '.' is the decimal separator (US/CSV style), remove potential thousands separators ',' (less likely if '.' is decimal)
-            n = parseFloat(s.replace(/,/g,''));
-        }
+        // Assume Brazilian/European style masking ('.' for thousands, ',' for decimal)
+        // Remove thousands separators '.', replace decimal ',' with '.'
+        const n = parseFloat(s.replace(/\./g,'').replace(',','.'));
 
-        return Number.isFinite(n) ? ((parenNeg || trailingNeg) ? -n : n) : NaN;
+
+        return Number.isFinite(n) ? (negative ? -n : n) : NaN;
     };
 
 
@@ -116,9 +110,16 @@
         // Focus the first focusable element inside the modal when it opens
         setTimeout(() => {
           const node = contentRef.current;
-          const focusables = node?.querySelectorAll('input,select,textarea,button,[tabindex]:not([tabindex="-1"])');
-          (focusables?.[0] || node)?.focus();
+          if (!node) return;
+          // --- FIX: Don't steal focus if an element inside the modal already has it ---
+          if (node.contains(document.activeElement)) return;
+          // --- END FIX ---
+          const focusables = node.querySelectorAll(
+            'input,select,textarea,button,[tabindex]:not([tabindex="-1"])'
+          );
+          (focusables[0] || node).focus();
         }, 0);
+
 
         // Handle Escape key and Tab key for accessibility
         const onKeyDown = (e) => {
@@ -196,6 +197,35 @@
       const [editingId, setEditingId] = useState(null); // ID of the expense being edited, null if adding
       const [ajusteValor, setAjusteValor] = useState(''); // Quick adjustment amount (Thais only)
       const [ajusteDesc, setAjusteDesc] = useState(''); // Quick adjustment description (Thais only)
+
+      // --- Additions for Value Input Mask ---
+      const valorRef = useRef(null); // ref pro input de valor
+
+      // formata string de dígitos para "pt-BR" com 2 casas
+      const formatBRLInput = (digits, negative=false) => {
+        const n = (Number(digits) || 0) / 100;
+        const fmt = n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return negative ? `-${fmt}` : fmt;
+      };
+
+      // handler do input
+      const handleValorChange = (e) => {
+        const raw = e.target.value;
+        const negative = raw.trim().startsWith('-');           // permite valores negativos se digitar "-"
+        const digits = raw.replace(/\D/g, '');                  // só números
+        if (!digits) { setFValor(negative ? '-' : ''); return; } // Allow just '-'
+        setFValor(formatBRLInput(digits, negative));
+      };
+
+      // mantém o cursor sempre no fim após formatar
+      useEffect(() => {
+        const el = valorRef.current;
+        if (!el || document.activeElement !== el) return; // Only run if the input is focused
+        const pos = el.value.length;
+        try { el.setSelectionRange(pos, pos); } catch (e) { console.warn("Could not set cursor position", e)} // Catch potential errors in edge cases
+      }, [fValor]); // Run whenever the formatted value changes
+      // --- END Additions ---
+
 
       // Delete confirmation state
       const [isDelOpen, setDelOpen] = useState(false); // Delete modal state
@@ -302,7 +332,13 @@
       const openEdit = (e) => {
         setEditingId(e.id);
         setFDesc(e.description || '');
-        setFValor(String(e.amount ?? '').replace('.', ',')); // Convert amount to BR format string for input
+        // --- FIX: Format value correctly when opening edit ---
+        setFValor(
+          (e.amount != null)
+            ? Number(e.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : ''
+        );
+        // --- END FIX ---
         setFData(e.date || new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
         setFTipo(e.type || 'Cartão');
         setFSplit(e.split || 'Dividido');
@@ -378,7 +414,7 @@
       // Save new or edited expense
       const salvarLancamento = async () => {
         if (!expensesColRef) return; // Ensure ref is valid
-        const val = parseMoney(fValor); // Parse amount string
+        const val = parseMoney(fValor); // Parse amount string (now handles masked input)
         // Basic validation
         if (!fDesc || !Number.isFinite(val)) {
           console.warn('Descrição ou valor inválido.'); // Avoid alert
@@ -398,7 +434,7 @@
           // Base payload for both add and update
           const payloadBase = {
             description: fDesc,
-            amount: val,
+            amount: val, // Use the correctly parsed numeric value
             date: fData, // Assume fData is already in 'dd/mm/yyyy' format
             split: fTipo === 'Ajuste' ? 'Thais' : fSplit, // Force split to Thais for Adjustments
             type: fTipo,
@@ -443,7 +479,7 @@
           console.warn('Ajuste só pode ser lançado pela Thais.'); // Avoid alert
           return;
         }
-        const val = parseMoney(ajusteValor);
+        const val = parseMoney(ajusteValor); // Parse potentially masked value
         // Adjustment must be positive
         if (!(val > 0)) {
           console.warn('Informe um valor POSITIVO para o ajuste.'); // Avoid alert
@@ -759,7 +795,7 @@
             const type = t.includes('ajuste') ? 'Ajuste' : t.includes('pix') ? 'Pix' : t.includes('boleto') ? 'Boleto' : 'Cartão'; // Default 'Cartão'
 
             // Parse Amount and validate essential fields
-            const amount = parseMoney(String(rawAmount));
+            const amount = parseMoney(String(rawAmount)); // Use parseMoney which handles masked input
             if (!Number.isFinite(amount) || !desc) {
                 console.warn(`Skipping row ${index + headerRow + 2}: Invalid amount ('${rawAmount}' -> ${amount}) or description ('${desc}')`);
                 return null; // Skip invalid rows
@@ -1340,7 +1376,18 @@
               </h2>
               {/* Form Fields */}
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Descrição" value={fDesc} onChange={e=>setFDesc(e.target.value)} required />
-              <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Valor (ex: 123,45)" inputMode="decimal" value={fValor} onChange={e=>setFValor(e.target.value)} required />
+              {/* --- Input de Valor com Máscara --- */}
+              <input
+                ref={valorRef}
+                className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500"
+                placeholder="0,00"
+                inputMode="numeric" /* Melhora experiência mobile */
+                pattern="[0-9]*" /* Ajuda na validação */
+                value={fValor}
+                onChange={handleValorChange}
+                required
+              />
+              {/* --- Fim Input de Valor --- */}
               <input className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 outline-none border border-transparent focus:border-indigo-500" placeholder="Data (dd/mm/aaaa)" value={fData} onChange={e=>setFData(e.target.value)} pattern="\d{2}/\d{2}/\d{4}" />
 
               {/* Installment field (only for Card type) */}
