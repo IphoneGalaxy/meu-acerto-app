@@ -59,19 +59,29 @@
       return n === 'inclusao de pagamento' || /\binclusao\b.*\bpagamento\b/.test(n);
     };
 
-    // (3) parseMoney mais robusto (casos “123,45-”)
+    // FIX: Handle both '.' and ',' as potential decimal separators
     const parseMoney = (input) => {
-      if (typeof input === 'number') return input;
-      if (!input) return NaN;
-      let s = String(input).replace(/R\$\s?/gi,'').replace(/\s+/g,'').trim(); // Remove spaces
-      const parenNeg = /^\(.*\)$/.test(s);
-      const trailingNeg = /-$/.test(s); // Check for trailing negative
-      if (parenNeg) s = s.replace(/[()]/g,'');
-      if (trailingNeg) s = s.slice(0, -1); // Remove trailing negative
-      const n = parseFloat(s.replace(/\./g,'').replace(',','.'));
-      // Apply negative sign if either parenthesis or trailing negative was found
-      return Number.isFinite(n) ? ((parenNeg || trailingNeg) ? -n : n) : NaN;
+        if (typeof input === 'number') return input;
+        if (!input) return NaN;
+        let s = String(input).replace(/R\$\s?/gi,'').replace(/\s+/g,'').trim(); // Remove R$ and extra spaces
+        const parenNeg = /^\(.*\)$/.test(s);
+        const trailingNeg = /-$/.test(s);
+        if (parenNeg) s = s.replace(/[()]/g,'');
+        if (trailingNeg) s = s.slice(0, -1);
+
+        let n;
+        // Check if it uses ',' as decimal separator (Brazilian/European style) - common in manually entered data
+        if (s.includes(',')) {
+            // Remove thousands separators '.', replace decimal ',' with '.'
+            n = parseFloat(s.replace(/\./g,'').replace(',','.'));
+        } else {
+            // Assume '.' is the decimal separator (US/CSV style), remove potential thousands separators ',' (less likely if '.' is decimal)
+            n = parseFloat(s.replace(/,/g,''));
+        }
+
+        return Number.isFinite(n) ? ((parenNeg || trailingNeg) ? -n : n) : NaN;
     };
+
 
     const excelSerialToPT = (v) => {
       if (typeof v === 'number') {
@@ -161,7 +171,7 @@
     };
 
     /* ================= Dashboard ================= */
-    const Dashboard = ({ user, onLogout, db }) => {
+    const Dashboard = ({ user, onLogout, db, appId, userId }) => {
       // State variables
       const [expenses, setExpenses] = useState([]); // All expenses
       const [installmentPlans, setInstallmentPlans] = useState([]); // Installment plans
@@ -203,23 +213,33 @@
         ? { text:'text-pink-600', darkText:'dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700', border:'border-pink-500' }
         : { text:'text-indigo-600', darkText:'dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700', border:'border-indigo-500' };
 
-      // Firestore collection references
-      const expensesColRef = useMemo(() => db.collection('expenses'), [db]);
-      const plansColRef    = useMemo(() => db.collection('installmentPlans'), [db]);
+      // Firestore collection references (using correct public path)
+      const expensesColRef = useMemo(() => {
+        if (!db || !appId) return null; // Prevent error if db/appId not ready
+        return db.collection(`artifacts/${appId}/public/data/expenses`);
+      }, [db, appId]);
+      const plansColRef = useMemo(() => {
+        if (!db || !appId) return null; // Prevent error if db/appId not ready
+        return db.collection(`artifacts/${appId}/public/data/installmentPlans`);
+      }, [db, appId]);
 
       // Firestore real-time listeners
       useEffect(() => {
+        // Only attach listeners if refs are valid
+        if (!expensesColRef || !plansColRef) return;
+
         // Subscribe to expenses collection
-        const unsub1 = expensesColRef.onSnapshot(s => setExpenses(s.docs.map(d => ({ id:d.id, ...d.data()}))));
+        const unsub1 = expensesColRef.onSnapshot(s => setExpenses(s.docs.map(d => ({ id:d.id, ...d.data()}))), err => console.error("expenses snapshot error", err));
         // Subscribe to installment plans collection
-        const unsub2 = plansColRef.onSnapshot(s => setInstallmentPlans(s.docs.map(d => ({ id:d.id, ...d.data()}))));
+        const unsub2 = plansColRef.onSnapshot(s => setInstallmentPlans(s.docs.map(d => ({ id:d.id, ...d.data()}))), err => console.error("plans snapshot error", err));
         // Unsubscribe on component unmount
         return () => { unsub1(); unsub2(); };
-      }, [expensesColRef, plansColRef]);
+      }, [expensesColRef, plansColRef]); // Dependencies are the refs themselves
 
       // Automatically generate missing past installments based on plans
       useEffect(() => {
-        if (installmentPlans.length === 0) return; // No plans, nothing to do
+        // Ensure refs are valid before proceeding
+        if (installmentPlans.length === 0 || !appId || !db || !expensesColRef) return;
         const today = new Date();
         const batch = db.batch(); // Use batch for efficiency
         let hasWrites = false; // Track if any writes are needed
@@ -229,8 +249,13 @@
           if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
 
           const deletedSet = new Set(plan.deletedParcels || []); // Track manually deleted installments
-          const [dd, mm, yyyy] = String(plan.startDate).split('/');
+          // Robust date parsing, assuming dd/mm/yyyy
+          const dateParts = String(plan.startDate).split('/');
+          if (dateParts.length !== 3) continue; // Skip if date format is wrong
+          const [dd, mm, yyyy] = dateParts.map(Number);
+          if (isNaN(dd) || isNaN(mm) || isNaN(yyyy) || mm < 1 || mm > 12) continue; // Basic date validation
           const start = new Date(yyyy, mm-1, dd); // Plan start date
+
           const per = round2(plan.totalAmount / plan.numberOfInstallments); // Amount per installment
           const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1)); // Amount for the last installment
 
@@ -266,7 +291,7 @@
         }
         // Commit the batch if any installments were added
         if (hasWrites) batch.commit().catch(console.error);
-      }, [installmentPlans, expenses, db, expensesColRef]); // Re-run when plans or expenses change
+      }, [installmentPlans, expenses, db, expensesColRef, appId]); // Re-run when plans or expenses change, and ensure appId is present
 
       /* ===== actions ===== */
 
@@ -289,7 +314,7 @@
 
       // Handle expense deletion
       const doDelete = async () => {
-        if (!delTarget) return;
+        if (!delTarget || !expensesColRef || !plansColRef) return; // Ensure refs are valid
         setDeleting(true);
         try {
           const expRef = expensesColRef.doc(delTarget.id);
@@ -300,6 +325,12 @@
             // Use a transaction to update the plan and delete the expense atomically
             await db.runTransaction(async (t) => {
               const planSnapshot = await t.get(planRef);
+              // Check if plan exists before trying to access data
+              if (!planSnapshot.exists) {
+                 console.warn(`Installment plan ${delTarget.installmentPlanId} not found during delete.`);
+                 t.delete(expRef); // Just delete the expense if plan is missing
+                 return;
+              }
               const currentDeleted = (planSnapshot.data()?.deletedParcels || []);
               const key = String(delTarget.parcela);
               // Add the parcela key to the deleted list if not already present
@@ -323,6 +354,8 @@
       // Normalize installment input (e.g., '2 / 12' -> '2/12')
       const normalizeParcelaInput = (s) => {
         let p = String(s || '').trim();
+        // Handle "Única" explicitly, return empty string which becomes null later
+        if (norm(p) === 'unica') return '';
         if (!p) return ''; // Empty means keep current value on update
         // Check for 'num / den' format
         if (/^\d+\s*\/\s*\d+$/.test(p)) {
@@ -341,6 +374,7 @@
 
       // Save new or edited expense
       const salvarLancamento = async () => {
+        if (!expensesColRef) return; // Ensure ref is valid
         const val = parseMoney(fValor); // Parse amount string
         // Basic validation
         if (!fDesc || !Number.isFinite(val)) {
@@ -350,10 +384,11 @@
 
         // Validate installment format if provided
         const parcelaNorm = normalizeParcelaInput(fParcela);
-        if (fParcela && !parcelaNorm) {
-          console.warn('Parcela inválida. Use o formato N/T.'); // Avoid alert
-          return;
+        if (fParcela && norm(fParcela) !== 'unica' && !parcelaNorm) { // Allow 'unica' even though it normalizes to ''
+            console.warn('Parcela inválida. Use o formato N/T ou deixe em branco/Única.'); // Avoid alert
+            return;
         }
+
 
         setSalvando(true);
         try {
@@ -373,7 +408,7 @@
             const payload = { ...payloadBase };
             // Only update 'parcela' if the input field was touched
             // Empty input '' means clear the parcela field (set to null)
-            if (fParcela !== '') payload.parcela = parcelaNorm || null;
+            payload.parcela = parcelaNorm || null; // Always update parcela field on edit
             await expensesColRef.doc(editingId).update(payload);
             setEditingId(null); // Reset editing state
           } else {
@@ -400,6 +435,7 @@
 
       // Add quick adjustment (Thais -> Guilherme)
       const adicionarAjusteRapido = async () => {
+        if (!expensesColRef) return; // Ensure ref is valid
         if (user !== 'Thais') {
           console.warn('Ajuste só pode ser lançado pela Thais.'); // Avoid alert
           return;
@@ -432,6 +468,7 @@
 
       // Delete all documents in a collection in batches
       const deleteCollection = async (colRef, chunkSize=450) => {
+        if (!colRef) return; // Ensure ref is valid
         let snap = await colRef.limit(chunkSize).get();
         while (!snap.empty) {
           const batch = db.batch();
@@ -443,6 +480,11 @@
 
       // Confirm and clear all expenses and plans
       const confirmAndClearAll = async () => {
+        // Ensure refs are valid before proceeding
+        if (!expensesColRef || !plansColRef) {
+             console.error("Firestore refs not ready for clear all.");
+             return;
+        }
         try {
           await deleteCollection(expensesColRef);
           await deleteCollection(plansColRef);
@@ -640,14 +682,32 @@
           // A) Detect the correct header row
           const rowsAoA = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }); // Read as array of arrays
           const headerNorm = (h) => norm(String(h)).replace(/\s+/g,'').replace(/[^a-z0-9]/g,''); // Normalizer for headers
-          // Find the first row containing normalized 'descricao' and 'valor'
+
+          // FIX: Improved header detection
           let headerRow = rowsAoA.findIndex(r => {
-            const joined = headerNorm(r.join(' '));
-            return joined.includes('descricao') && joined.includes('valor');
+             const normalizedHeaders = r.map(h => headerNorm(String(h)));
+             // Check for essential normalized headers present in the sample CSV
+             return normalizedHeaders.includes('datadecompra') && // 'Data de compra'
+                    normalizedHeaders.includes('descricao') &&
+                    normalizedHeaders.includes('valoremr');    // 'Valor (em R$)'
           });
-          if (headerRow < 0) headerRow = 0; // Fallback to the first row if not found
+          // FIX: Fallback to the SECOND row (index 1) if specific headers aren't found
+          if (headerRow < 0) {
+              console.warn("Could not reliably detect header row based on content, falling back to row 2 (index 1).")
+              headerRow = 1;
+          }
+          // --- END FIX ---
+
+          // Ensure headerRow is within bounds
+          if (headerRow >= rowsAoA.length) {
+              console.error("Header row index out of bounds.");
+              return;
+          }
+
 
           const headers = rowsAoA[headerRow]; // Actual headers
+          console.log("Detected headers:", headers, "at row index:", headerRow);
+
           // Convert data rows (after header) into objects using the found headers
           const rows = rowsAoA.slice(headerRow + 1).map(r => {
             const o = {};
@@ -667,7 +727,7 @@
           };
 
           // Map row objects to the expected expense format
-          const mapped = rows.map(row => {
+          const mapped = rows.map((row, index) => {
             // Use 'pick' with various possible header names for each field
             const desc = pick(row, ['descricao','descrição','description']);
             if (shouldIgnoreDescription(desc)) return null; // pula essa linha
@@ -683,36 +743,78 @@
             // Expanded date tokens
             const rawDate = pick(row, ['data','date','datacompra','datadecompra','datalancto','datatransacao','datatransação']);
             const rawType = pick(row, ['tipo','type','formapagamento']);
-            const rawSource = pick(row, ['origem','fonte','paymentsource','source','cartao','cartão']);
+            // FIX: Add more tokens for source and card name
+            const rawSource = pick(row, ['origem','fonte','paymentsource','source','cartao','cartão', 'finaldocartao', 'finaldocartão']);
+            const rawCardName = pick(row, ['nomecartao', 'nomecartão', 'nomenocartao', 'nomenocartão']);
+            // END FIX
             const rawParcela = pick(row, ['parcela','installment']);
             const rawSplit = pick(row, ['split','divisao','divisão','rateio']);
-            const rawPaidBy = pick(row,['paidby','pagopor']);
+            const rawPaidBy = pick(row,['paidby','pagopor']); // Note: CSV doesn't have explicit 'paid by' for Pix/Boleto
 
-            // Normalize Type
+            // Normalize Type (Default to Cartão if not specified)
             const t = norm(rawType);
-            const type = t.includes('ajuste') ? 'Ajuste' : t.includes('pix') ? 'Pix' : t.includes('boleto') ? 'Boleto' : 'Cartão';
+            const type = t.includes('ajuste') ? 'Ajuste' : t.includes('pix') ? 'Pix' : t.includes('boleto') ? 'Boleto' : 'Cartão'; // Default 'Cartão'
 
             // Parse Amount and validate essential fields
             const amount = parseMoney(String(rawAmount));
-            if (!Number.isFinite(amount) || !desc) return null; // Skip invalid rows
+            if (!Number.isFinite(amount) || !desc) {
+                console.warn(`Skipping row ${index + headerRow + 2}: Invalid amount ('${rawAmount}' -> ${amount}) or description ('${desc}')`);
+                return null; // Skip invalid rows
+            }
+
 
             // Parse/Format Date
             const date = excelSerialToPT(rawDate);
-            // Determine Payment Source
-            const srcN = norm(rawSource);
-            const paymentSource = type === 'Cartão'
-              ? (srcN.includes('7292') || srcN.includes('digital') || /virt/.test(srcN)
-                  ? 'Cartão Digital (final 7292)' // Identify Digital card
-                  : (rawSource || (user==='Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'))) // Default to user's primary card or use provided source
-              : type; // For non-card types, source is the type
+            if (!date) { // Add check for valid date parsing
+                 console.warn(`Skipping row ${index + headerRow + 2}: Invalid date ('${rawDate}')`);
+                 return null;
+            }
+
+
+            // FIX: Determine Payment Source using Final do Cartao / Nome no Cartao if available
+            const finalCartao = norm(rawSource);
+            let resolvedSource = type === 'Cartão' ? (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)') : type; // Default
+
+            if (type === 'Cartão') {
+                if (finalCartao.includes('2581')) resolvedSource = 'Cartão Guilherme (final 2581)';
+                else if (finalCartao.includes('1009')) resolvedSource = 'Cartão Thais (final 1009)';
+                else if (finalCartao.includes('7292')) resolvedSource = 'Cartão Digital (final 7292)';
+                // Fallback using rawCardName if finalCartao is empty or didn't match
+                else if (rawCardName) {
+                    const nameNorm = norm(rawCardName);
+                    if (nameNorm.includes('guilherme')) resolvedSource = 'Cartão Guilherme (final 2581)';
+                    else if (nameNorm.includes('thais')) resolvedSource = 'Cartão Thais (final 1009)';
+                    // Add check for digital card name if known, e.g., if (nameNorm.includes('digital')) ...
+                }
+                 // If still unsure, keep the default based on logged-in user
+            } else {
+                 resolvedSource = type; // Non-card type
+            }
+            const paymentSource = resolvedSource; // Final source
+            // --- END FIX ---
 
             // Determine Split and Paid By
-            const split = canonicalSplit(rawSplit); // Normalize split value
-            const paidNorm = norm(rawPaidBy);
-            const paidBy = type === 'Cartão' ? 'Cartão' : // Card payments are 'Cartão'
-              paidNorm.includes('thais') ? 'Thais' : // Identify payer if provided
-              paidNorm.includes('guilherme') ? 'Guilherme' :
-              user; // Default to current user if not specified
+            const split = canonicalSplit(rawSplit || (amount < 0 ? user : 'Dividido')); // Default Split: If negative amount assume user, else divided. Explicit column overrides.
+            // FIX: Determine Paid By more accurately for non-card
+            let resolvedPaidBy = user; // Default to current user for Pix/Boleto
+             if (type === 'Cartão') {
+                 resolvedPaidBy = 'Cartão'; // Card payments are always 'Cartão'
+             } else if (type === 'Ajuste') {
+                 resolvedPaidBy = 'Thais'; // Adjustments are always Thais -> Gui
+             } else { // Pix or Boleto - try to infer from card name if available from CSV
+                 const nameNorm = norm(rawCardName);
+                 if (nameNorm.includes('guilherme')) resolvedPaidBy = 'Guilherme';
+                 else if (nameNorm.includes('thais')) resolvedPaidBy = 'Thais';
+                 // Explicit PaidBy column overrides inference
+                 if (rawPaidBy) {
+                      const paidNorm = norm(rawPaidBy);
+                      if (paidNorm.includes('thais')) resolvedPaidBy = 'Thais';
+                      else if (paidNorm.includes('guilherme')) resolvedPaidBy = 'Guilherme';
+                 }
+                 // else keep default 'user'
+             }
+             const paidBy = resolvedPaidBy; // Final paidBy
+             // --- END FIX ---
 
             // Normalize Installment
             let parcela = normalizeParcelaInput(rawParcela); // Use the robust normalizer
@@ -721,6 +823,9 @@
             // Return the structured expense object
             return { description: desc, amount, date, split, paidBy, paymentSource, type, parcela };
           }).filter(Boolean); // Filter out null results from invalid rows
+
+          console.log(`Successfully mapped ${mapped.length} rows from file.`);
+
 
           // Show import confirmation modal if valid rows were found
           if (mapped.length === 0) {
@@ -740,7 +845,7 @@
 
       // Confirm and execute the import process
       const confirmImport = async () => {
-        if (isImporting) return; // Prevent double import
+        if (isImporting || !expensesColRef) return; // Prevent double import, ensure ref valid
         setIsImporting(true);
         try {
           // Filter out potential duplicates already present in Firestore
@@ -755,6 +860,7 @@
               canonicalSplit(ex.split) === canonicalSplit(imp.split) // Compare normalized split
             )
           );
+           console.log(`Importing ${unique.length} unique expenses out of ${importedExpenses.length} mapped.`);
 
           // Add unique expenses to Firestore in batches
           const chunkSize = 450; // Firestore batch write limit is ~500
@@ -762,11 +868,13 @@
             const chunk = unique.slice(i, i + chunkSize);
             const batch = db.batch();
             chunk.forEach(e => batch.set(expensesColRef.doc(), e)); // Add each expense in the chunk to the batch
+            console.log(`Committing batch ${Math.floor(i/chunkSize) + 1} with ${chunk.length} expenses.`);
             await batch.commit(); // Commit the batch
           }
           // Clear import state and close modal on success
           setImportedExpenses([]);
           setImportModalOpen(false);
+           console.log("Import completed successfully.");
         } catch (e) {
           console.error("Import execution error:", e);
           // alert('Falha ao importar.'); // Avoid alert
@@ -789,11 +897,12 @@
             // Show card expenses based on card owner
             return user === 'Guilherme' ? src.includes('2581') : src.includes('1009');
           }
-          // Adjustments made by Thais are visible to both for calculation purposes
-          if (e.type === 'Ajuste' && e.paidBy === 'Thais') return true;
+          // Adjustments made by Thais are visible only to Thais in the list, but counted for both in totals
+          if (e.type === 'Ajuste') return user === 'Thais'; // Only Thais sees adjustments in her list
           // Show Pix/Boleto based on who paid
           return e.paidBy === user;
         });
+
 
         // Apply the selected filter ('Todos', 'Cartão', 'Parcelados', etc.)
         let filtered = userVisible;
@@ -802,9 +911,10 @@
           case 'Parcelados': filtered = userVisible.filter(e => !!e.parcela); break;
           case 'Pix':        filtered = userVisible.filter(e => e.type==='Pix'); break;
           case 'Boleto':     filtered = userVisible.filter(e => e.type==='Boleto'); break;
-          case 'Ajustes':    filtered = userVisible.filter(e => e.type === 'Ajuste'); break;
-          default:           filtered = userVisible; // 'Todos' case
+          case 'Ajustes':    filtered = userVisible.filter(e => e.type === 'Ajuste'); break; // Filter adjustments if selected
+          default:           filtered = userVisible.filter(e => e.type !== 'Ajuste'); // 'Todos' excludes Ajustes from list by default
         }
+
 
         // Sort the filtered expenses
         return filtered.sort((a,b) => {
@@ -868,11 +978,12 @@
         const reals = expenses.filter(e => e.type==='Pix' || e.type==='Boleto' || e.type==='Ajuste');
         for (const e of reals) {
           const v = Number(e.amount||0);
-          if (e.paidBy==='Guilherme' || e.paidBy==='Digital') g+=v; // Digital payments count as Guilherme's
+          if (e.paidBy==='Guilherme') g+=v; // Digital payments are paid by Gui/Thais via Pix/Boleto, not Digital card itself
           else if (e.paidBy==='Thais') t+=v;
         }
         return { gPaid:round2(g), tPaid:round2(t) };
       }, [expenses]);
+
 
       // Calculate overall share for each person (excluding Adjustments)
       const partsGeral = useMemo(() => {
@@ -1111,7 +1222,7 @@
             </button>
             <button onClick={()=>fileInputRef.current?.click()}
               className="flex-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-3 px-4 rounded-xl shadow-lg hover:bg-slate-300 dark:hover:bg-slate-600">
-              Importar Planilha
+              Importar
             </button>
             {/* Hidden file input triggered by the button above */}
             <input ref={fileInputRef} type="file" className="hidden" accept=".csv,.xlsx,.xls,.ods" onChange={handleFileUpload} />
@@ -1139,9 +1250,9 @@
               {filteredAndSortedExpenses.map(expense => {
                 const splitCan = canonicalSplit(expense.split); // Normalized split for border color
                 return (
-                  // Grid layout for expense item: Description/Details | Amount/Actions
                   <div
                     key={expense.id}
+                    // Grid layout for expense item: Description/Details | Amount/Actions
                     className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 sm:p-3
                            rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 transition-all ${
                              splitCan==='Guilherme' ? 'border-indigo-500' // Blue border for Guilherme's share
@@ -1337,23 +1448,47 @@
       const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));
       const [db, setDb] = useState(null);
       const [authReady, setAuthReady] = useState(false);
+      const [userId, setUserId] = useState(null); // <-- State for userId
       const [error, setError] = useState(null);
+
+      // Get appId from global variable (provided by Canvas)
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
       // Initialize Firebase on component mount
       useEffect(() => {
-        // Firebase configuration (replace with your actual config)
-        const firebaseConfig = {
-          apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk", // Keep as is, will be replaced if needed
-          authDomain: "meu-acerto-app.firebaseapp.com",
-          projectId: "meu-acerto-app",
-          storageBucket: "meu-acerto-app.appspot.com",
-          messagingSenderId: "326844075367",
-          // (1) Correct appId format with colons
-          appId: "1:326844075367:web:0315e86713b1e0071f33c2"
-        };
+        // --- FIX: Use the globally provided firebase config from Canvas ---
+        let firebaseConfig;
+        try {
+          // __firebase_config is a JSON string, it must be parsed.
+          if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            firebaseConfig = JSON.parse(__firebase_config);
+          } else {
+            // Fallback for local testing (though token mismatch will still occur locally)
+            console.warn("Global __firebase_config not found. Using hardcoded fallback for local dev.");
+            // NOTE: This fallback WILL cause auth/custom-token-mismatch if __initial_auth_token is present
+            // but is kept just to allow the app to *try* to init locally.
+            firebaseConfig = {
+              apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
+              authDomain: "meu-acerto-app.firebaseapp.com",
+              projectId: "meu-acerto-app",
+              storageBucket: "meu-acerto-app.appspot.com",
+              messagingSenderId: "326844075367",
+              appId: "1:326844075367:web:0315e86713b1e0071f33c2"
+            };
+          }
+        } catch (e) {
+          console.error("Failed to parse __firebase_config:", e);
+          setError("Falha ao carregar configuração do Firebase.");
+          return;
+        }
+        // --- END FIX ---
+
         try {
           // Initialize Firebase app if not already initialized
-          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); // Use the parsed config
+
+          // Enable Firestore logging
+          firebase.firestore.setLogLevel('debug');
 
           // Get Firestore instance and enable offline persistence with tab synchronization
           const firestoreDb = firebase.firestore();
@@ -1364,22 +1499,55 @@
           // Firebase Authentication
           const auth = firebase.auth();
           // Listener for authentication state changes
-          const unsub = auth.onAuthStateChanged(user => setAuthReady(!!user));
+          const unsub = auth.onAuthStateChanged(user => {
+            setAuthReady(!!user);
+            setUserId(user ? user.uid : null); // <-- Set userId from auth state
+          });
 
-          // Sign in anonymously if not already signed in
+          // Sign in using token or anonymously
           (async () => {
             try {
               // Set persistence to local (keeps user signed in across sessions)
               await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-              // Sign in anonymously
-              if (!auth.currentUser) {
+              
+              // Use provided token if available (Canvas environment)
+              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                // Only attempt signInWithCustomToken if not already signed in
+                 if (!auth.currentUser) {
+                     console.log("Attempting sign in with custom token...");
+                     await auth.signInWithCustomToken(__initial_auth_token);
+                     console.log("Sign in with custom token successful.");
+                 } else {
+                     console.log("User already signed in, skipping token sign in.");
+                     setAuthReady(true); // Ensure authReady is true if already signed in
+                     setUserId(auth.currentUser.uid); // Ensure userId is set
+                 }
+              } else if (!auth.currentUser) {
+                // Fallback to anonymous sign-in if no token and no current user
+                console.log("No custom token found, attempting anonymous sign in...");
                 await auth.signInAnonymously();
+                 console.log("Anonymous sign in successful.");
               } else {
-                setAuthReady(true); // Already signed in
+                 console.log("User already signed in (no token provided).");
+                 setAuthReady(true); // Ensure authReady is true if already signed in
+                 setUserId(auth.currentUser.uid); // Ensure userId is set
               }
+              // The onAuthStateChanged listener might fire again, but state updates are idempotent
             } catch (err) {
               console.error("Firebase Auth Error:", err);
-              setError(`Erro de autenticação: ${err.message}. Verifique a conexão e as configurações.`);
+              // Don't set a blocking error for mismatch, just log it.
+              // The app might still work anonymously if configured.
+              if (err.code !== 'auth/custom-token-mismatch') {
+                 setError(`Erro de autenticação: ${err.message}.`);
+              } else {
+                 console.warn("Custom token mismatch. This is expected in local dev without the correct config.");
+                 // If token fails, try anonymous sign in as a last resort
+                 if (!auth.currentUser) {
+                    console.log("Token mismatch, attempting anonymous sign in as fallback...");
+                    await auth.signInAnonymously();
+                    console.log("Fallback anonymous sign in successful.");
+                 }
+              }
             }
           })();
 
@@ -1404,11 +1572,13 @@
 
       // Conditional Rendering based on state
       if (error) return <div className="min-h-screen flex items-center justify-center text-red-500 font-semibold p-4 text-center">{error}</div>; // Show error message
-      if (!db || !authReady) return <div className="min-h-screen flex items-center justify-center text-slate-500 animate-pulse">A ligar ao servidor…</div>; // Show loading indicator
+      // Wait for db, auth, AND userId
+      if (!db || !authReady || !userId) return <div className="min-h-screen flex items-center justify-center text-slate-500 animate-pulse">A ligar ao servidor…</div>; // Show loading indicator
       if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />; // Show user selection if no user is selected
 
       // Show Dashboard if initialized and user is selected
-      return <Dashboard user={currentUser} onLogout={handleLogout} db={db} />;
+      // Pass appId and userId to Dashboard
+      return <Dashboard user={currentUser} onLogout={handleLogout} db={db} appId={appId} userId={userId} />;
     };
 
     // Mount the App component directly after definition
