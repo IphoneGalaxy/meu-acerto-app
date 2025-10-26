@@ -171,7 +171,7 @@
     };
 
     /* ================= Dashboard ================= */
-    const Dashboard = ({ user, onLogout, db, appId, userId }) => {
+    const Dashboard = ({ user, onLogout, db, appId, userId }) => { // appId might be null/default outside Canvas
       // State variables
       const [expenses, setExpenses] = useState([]); // All expenses
       const [installmentPlans, setInstallmentPlans] = useState([]); // Installment plans
@@ -213,15 +213,17 @@
         ? { text:'text-pink-600', darkText:'dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700', border:'border-pink-500' }
         : { text:'text-indigo-600', darkText:'dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700', border:'border-indigo-500' };
 
-      // Firestore collection references (using correct public path)
+      // --- FIX: Use direct collection names for standalone deployment ---
       const expensesColRef = useMemo(() => {
-        if (!db || !appId) return null; // Prevent error if db/appId not ready
-        return db.collection(`artifacts/${appId}/public/data/expenses`);
-      }, [db, appId]);
+        if (!db) return null;
+        return db.collection('expenses');
+      }, [db]);
       const plansColRef = useMemo(() => {
-        if (!db || !appId) return null; // Prevent error if db/appId not ready
-        return db.collection(`artifacts/${appId}/public/data/installmentPlans`);
-      }, [db, appId]);
+        if (!db) return null;
+        return db.collection('installmentPlans');
+      }, [db]);
+      // --- END FIX ---
+
 
       // Firestore real-time listeners
       useEffect(() => {
@@ -239,7 +241,8 @@
       // Automatically generate missing past installments based on plans
       useEffect(() => {
         // Ensure refs are valid before proceeding
-        if (installmentPlans.length === 0 || !appId || !db || !expensesColRef) return;
+        // appId is no longer needed here as the ref path doesn't depend on it
+        if (installmentPlans.length === 0 || !db || !expensesColRef) return;
         const today = new Date();
         const batch = db.batch(); // Use batch for efficiency
         let hasWrites = false; // Track if any writes are needed
@@ -291,7 +294,7 @@
         }
         // Commit the batch if any installments were added
         if (hasWrites) batch.commit().catch(console.error);
-      }, [installmentPlans, expenses, db, expensesColRef, appId]); // Re-run when plans or expenses change, and ensure appId is present
+      }, [installmentPlans, expenses, db, expensesColRef]); // Removed appId dependency
 
       /* ===== actions ===== */
 
@@ -877,7 +880,9 @@
            console.log("Import completed successfully.");
         } catch (e) {
           console.error("Import execution error:", e);
-          // alert('Falha ao importar.'); // Avoid alert
+          // --- ADD Alert on failure ---
+          alert(`Falha ao importar: ${e?.message || e}`);
+          // --- END Alert ---
         } finally {
           setIsImporting(false);
         }
@@ -1451,41 +1456,26 @@
       const [userId, setUserId] = useState(null); // <-- State for userId
       const [error, setError] = useState(null);
 
-      // Get appId from global variable (provided by Canvas)
+      // Get appId from global variable (only relevant for Canvas pathing, not used here)
       const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
       // Initialize Firebase on component mount
       useEffect(() => {
-        // --- FIX: Use the globally provided firebase config from Canvas ---
-        let firebaseConfig;
-        try {
-          // __firebase_config is a JSON string, it must be parsed.
-          if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-            firebaseConfig = JSON.parse(__firebase_config);
-          } else {
-            // Fallback for local testing (though token mismatch will still occur locally)
-            console.warn("Global __firebase_config not found. Using hardcoded fallback for local dev.");
-            // NOTE: This fallback WILL cause auth/custom-token-mismatch if __initial_auth_token is present
-            // but is kept just to allow the app to *try* to init locally.
-            firebaseConfig = {
-              apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
-              authDomain: "meu-acerto-app.firebaseapp.com",
-              projectId: "meu-acerto-app",
-              storageBucket: "meu-acerto-app.appspot.com",
-              messagingSenderId: "326844075367",
-              appId: "1:326844075367:web:0315e86713b1e0071f33c2"
-            };
-          }
-        } catch (e) {
-          console.error("Failed to parse __firebase_config:", e);
-          setError("Falha ao carregar configuração do Firebase.");
-          return;
-        }
-        // --- END FIX ---
+        // --- Use your Firebase config directly when deploying outside Canvas ---
+        // Replace with your actual Firebase project config
+        const firebaseConfig = {
+          apiKey: "YOUR_API_KEY", // <-- Replace
+          authDomain: "YOUR_AUTH_DOMAIN", // <-- Replace
+          projectId: "YOUR_PROJECT_ID", // <-- Replace
+          storageBucket: "YOUR_STORAGE_BUCKET", // <-- Replace
+          messagingSenderId: "YOUR_MESSAGING_SENDER_ID", // <-- Replace
+          appId: "YOUR_APP_ID" // <-- Replace
+        };
+        // --- END Config ---
 
         try {
           // Initialize Firebase app if not already initialized
-          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); // Use the parsed config
+          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); // Use your config
 
           // Enable Firestore logging
           firebase.firestore.setLogLevel('debug');
@@ -1504,50 +1494,26 @@
             setUserId(user ? user.uid : null); // <-- Set userId from auth state
           });
 
-          // Sign in using token or anonymously
+          // Sign in anonymously (since there's no custom token outside Canvas)
           (async () => {
             try {
               // Set persistence to local (keeps user signed in across sessions)
               await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-              
-              // Use provided token if available (Canvas environment)
-              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                // Only attempt signInWithCustomToken if not already signed in
-                 if (!auth.currentUser) {
-                     console.log("Attempting sign in with custom token...");
-                     await auth.signInWithCustomToken(__initial_auth_token);
-                     console.log("Sign in with custom token successful.");
-                 } else {
-                     console.log("User already signed in, skipping token sign in.");
-                     setAuthReady(true); // Ensure authReady is true if already signed in
-                     setUserId(auth.currentUser.uid); // Ensure userId is set
-                 }
-              } else if (!auth.currentUser) {
-                // Fallback to anonymous sign-in if no token and no current user
-                console.log("No custom token found, attempting anonymous sign in...");
+
+              // Sign in anonymously if no current user
+              if (!auth.currentUser) {
+                console.log("Attempting anonymous sign in...");
                 await auth.signInAnonymously();
-                 console.log("Anonymous sign in successful.");
+                console.log("Anonymous sign in successful.");
               } else {
-                 console.log("User already signed in (no token provided).");
-                 setAuthReady(true); // Ensure authReady is true if already signed in
-                 setUserId(auth.currentUser.uid); // Ensure userId is set
+                console.log("User already signed in.");
+                setAuthReady(true); // Ensure authReady is true if already signed in
+                setUserId(auth.currentUser.uid); // Ensure userId is set
               }
-              // The onAuthStateChanged listener might fire again, but state updates are idempotent
+              // The onAuthStateChanged listener will handle setting authReady and userId
             } catch (err) {
-              console.error("Firebase Auth Error:", err);
-              // Don't set a blocking error for mismatch, just log it.
-              // The app might still work anonymously if configured.
-              if (err.code !== 'auth/custom-token-mismatch') {
-                 setError(`Erro de autenticação: ${err.message}.`);
-              } else {
-                 console.warn("Custom token mismatch. This is expected in local dev without the correct config.");
-                 // If token fails, try anonymous sign in as a last resort
-                 if (!auth.currentUser) {
-                    console.log("Token mismatch, attempting anonymous sign in as fallback...");
-                    await auth.signInAnonymously();
-                    console.log("Fallback anonymous sign in successful.");
-                 }
-              }
+              console.error("Firebase Auth Error (Anonymous Sign In):", err);
+              setError(`Erro de autenticação: ${err.message}.`);
             }
           })();
 
@@ -1577,7 +1543,7 @@
       if (!currentUser) return <UserSelectionScreen onSelectUser={handleSelectUser} />; // Show user selection if no user is selected
 
       // Show Dashboard if initialized and user is selected
-      // Pass appId and userId to Dashboard
+      // Pass appId (might be default) and userId to Dashboard
       return <Dashboard user={currentUser} onLogout={handleLogout} db={db} appId={appId} userId={userId} />;
     };
 
@@ -1591,7 +1557,8 @@
 
     // Register Service Worker after window loads
     window.onload = () => {
-      if ('serviceWorker' in navigator) {
+      // Don't register SW if not available (e.g., local file://)
+      if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
         navigator.serviceWorker.register('sw.js').catch(error => {
           console.warn('Service Worker registration failed:', error);
         });
