@@ -59,22 +59,60 @@
       return n === 'inclusao de pagamento' || /\binclusao\b.*\bpagamento\b/.test(n);
     };
 
-    // FIX: Handle both '.' and ',' as potential decimal separators
+    // --- FIX: Updated parseMoney to handle numbers and different string formats ---
     const parseMoney = (input) => {
-        if (typeof input === 'number') return input;
-        if (!input) return NaN;
-        // Handle masked input like "1.234,56" or "-1.234,56"
-        let s = String(input).replace(/\s+/g,'').trim(); // Remove extra spaces
-        const negative = s.startsWith('-');
-        if (negative) s = s.substring(1); // Remove leading negative for parsing
+      if (typeof input === 'number') return input;     // número do Excel já vem OK
+      if (input == null || input === '') return NaN; // Treat empty string as invalid
 
-        // Assume Brazilian/European style masking ('.' for thousands, ',' for decimal)
-        // Remove thousands separators '.', replace decimal ',' with '.'
-        const n = parseFloat(s.replace(/\./g,'').replace(',','.'));
+      let s = String(input).replace(/\s+/g, '').trim(); // Remove spaces
+      const parenNeg = /^\(.*\)$/.test(s); // Check for parenthesis negative
+      const trailingNeg = /-$/.test(s); // Check for trailing negative
 
+      if (parenNeg) s = s.replace(/[()]/g, '');
+      if (trailingNeg) s = s.slice(0, -1);
 
-        return Number.isFinite(n) ? (negative ? -n : n) : NaN;
+      const negativeSign = parenNeg || trailingNeg; // Keep track if original was negative
+
+      // Now handle leading '-' if present after removing trailing/parenthesis
+      const leadingNegative = s.startsWith('-');
+      if(leadingNegative) s = s.slice(1);
+
+      let n;
+      const hasComma = s.includes(',');
+      const hasDot = s.includes('.');
+
+      if (hasComma && !hasDot) {
+        // Ex.: 1234,56 (BR decimal only)
+        n = parseFloat(s.replace(',', '.'));
+      } else if (hasDot && !hasComma) {
+        // Ex.: 1145.65 (US decimal only)
+         // Check if the dot is likely a decimal (only one dot, near the end)
+         if (s.indexOf('.') === s.lastIndexOf('.') && s.length - s.indexOf('.') <= 3) {
+            n = parseFloat(s);
+         } else {
+             // Assume dot is thousands separator: 1.234 -> 1234
+             n = parseFloat(s.replace(/\./g, ''));
+         }
+      } else if (hasComma && hasDot) {
+        // Has both: decide by the last separator
+        const lastComma = s.lastIndexOf(',');
+        const lastDot = s.lastIndexOf('.');
+        if (lastComma > lastDot) {
+          // 1.234,56 -> BR format
+          n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+        } else {
+          // 1,234.56 -> US format
+          n = parseFloat(s.replace(/,/g, ''));
+        }
+      } else {
+        // Only digits (or empty after removing signs)
+        n = parseFloat(s);
+      }
+
+      // Apply negative sign if determined earlier or if it was leading
+      return Number.isFinite(n) ? ((negativeSign || leadingNegative) ? -n : n) : NaN;
     };
+    // --- END FIX ---
 
 
     const excelSerialToPT = (v) => {
@@ -466,7 +504,7 @@
 
         } catch (e) {
           console.error("Save error:", e);
-          // alert('Falha ao salvar.'); // Avoid alert
+          // alert('Falha ao salvar.'); // Avoid using alert
         } finally {
           setSalvando(false);
         }
@@ -794,8 +832,9 @@
             const t = norm(rawType);
             const type = t.includes('ajuste') ? 'Ajuste' : t.includes('pix') ? 'Pix' : t.includes('boleto') ? 'Boleto' : 'Cartão'; // Default 'Cartão'
 
-            // Parse Amount and validate essential fields
-            const amount = parseMoney(String(rawAmount)); // Use parseMoney which handles masked input
+            // --- FIX: Pass rawAmount directly to parseMoney ---
+            const amount = parseMoney(rawAmount); // Use parseMoney which handles masked input
+            // --- END FIX ---
             if (!Number.isFinite(amount) || !desc) {
                 console.warn(`Skipping row ${index + headerRow + 2}: Invalid amount ('${rawAmount}' -> ${amount}) or description ('${desc}')`);
                 return null; // Skip invalid rows
