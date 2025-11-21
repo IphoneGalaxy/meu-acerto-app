@@ -4,7 +4,7 @@
   "short_name": "Acerto",
   "lang": "pt-PT",
   "dir": "ltr",
-  "description": "Um aplicativo para gerenciar e dividir despesas entre duas pessoas.",
+  "description": "Um aplicativo para gerenciar e dividir despesas entre duas pessoas, com histórico mensal e painel por mês de competência.",
   "start_url": "/meu-acerto-app/",
   "scope": "/meu-acerto-app/",
   "display": "standalone",
