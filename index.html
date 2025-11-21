@@ -114,15 +114,16 @@
     const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 
     const ptDateToDateObj = (pt) => {
-      const m = String(pt || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      const m = String(pt || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (!m) return null;
       return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12);
     };
 
     const monthKeyFromPtDate = (pt) => {
-      const m = String(pt || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      const m = String(pt || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (!m) return null;
-      return `${m[3]}-${m[2]}`;
+      // Garante 2 dígitos no mês para consistência (ex: '2025-09' e não '2025-9')
+      return `${m[3]}-${m[2].padStart(2,'0')}`;
     };
 
     const monthKeyFromDateObj = (d) => {
@@ -157,11 +158,9 @@
       return null;
     };
 
-    /* ========= MIGRATION UTILS (Backfill Global) ========= */
-    
+    /* ========= MIGRATION UTILS ========= */
     async function backfillAllMonthKeys(db) {
       const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;
-      
       const expCol = collection(db, 'expenses');
       let lastDoc = null;
       let totalAtualizados = 0;
@@ -169,7 +168,6 @@
       while (true) {
         let constraints = [orderBy(documentId()), limit(500)];
         if (lastDoc) constraints.push(startAfter(lastDoc));
-        
         const q = query(expCol, ...constraints);
         const snap = await getDocs(q);
         
@@ -193,16 +191,13 @@
           await batch.commit();
           totalAtualizados += changed;
         }
-
         lastDoc = snap.docs[snap.docs.length - 1];
       }
-
-      console.log(`[backfillAllMonthKeys] Total atualizados: ${totalAtualizados}`);
+      console.log(`[backfill] Total atualizados: ${totalAtualizados}`);
       localStorage.setItem('mkBackfillDone', '1');
     }
 
     /* ========= Components ========= */
-
     const Modal = ({ isOpen, onClose, children }) => {
       if (!isOpen) return null;
       return (
@@ -230,13 +225,11 @@
     );
 
     /* ========= Dashboard ========= */
-
     const Dashboard = ({ user, onLogout, db }) => {
       const [expenses, setExpenses] = useState([]);
       const [installmentPlans, setInstallmentPlans] = useState([]);
       const [monthsFromDb, setMonthsFromDb] = useState([]);
       
-      // --- CORREÇÃO AQUI: Inicialização explícita e lazy ---
       const [currentMonth, setCurrentMonth] = useState(() => currentMonthKey());
       
       const [filterType, setFilterType] = useState('Todos');
@@ -283,7 +276,7 @@
         setFValor(formatBRLInput(digits, negative));
       };
 
-      // 1. Listener de PLANOS
+      // Listeners
       useEffect(() => {
         if (!db) return;
         const plansRef = collection(db, 'installmentPlans');
@@ -291,7 +284,6 @@
         return () => unsub();
       }, [db]);
 
-      // 2. Listener de MESES
       useEffect(() => {
         if (!db) return;
         const expRef = collection(db, 'expenses');
@@ -303,7 +295,6 @@
         return () => unsub();
       }, [db]);
 
-      // 3. Listener de DESPESAS (Filtro por Mês)
       useEffect(() => {
         if (!db || !currentMonth) return;
         const expRef = collection(db, 'expenses');
@@ -314,14 +305,13 @@
         return () => unsub();
       }, [db, currentMonth]);
 
-      // Geração de Parcelas
+      // Geração Parcelas
       useEffect(() => {
         if (!installmentPlans.length || !db) return;
         const generate = async () => {
             const expCol = collection(db, 'expenses');
             const batch = writeBatch(db);
             let hasWrites = false;
-
             for (const plan of installmentPlans) {
                 if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
                 const [dd, mm, yyyy] = String(plan.startDate).split('/').map(Number);
@@ -329,16 +319,13 @@
                 const deletedSet = new Set(plan.deletedParcels || []);
                 const per = round2(plan.totalAmount / plan.numberOfInstallments);
                 const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1));
-
                 for (let i = 0; i < plan.numberOfInstallments; i++) {
                     const d = new Date(start.getFullYear(), start.getMonth() + i, start.getDate(), 12);
                     const parcelaKey = `${i+1}/${plan.numberOfInstallments}`;
                     if (deletedSet.has(parcelaKey)) continue;
-
                     const mk = monthKeyFromDateObj(d);
                     const dateStr = d.toLocaleDateString('pt-PT', { timeZone: 'UTC' });
                     const amount = (i+1) === plan.numberOfInstallments ? last : per;
-
                     const qDup = query(expCol, where('installmentPlanId','==', plan.id), where('parcela','==', parcelaKey), where('monthKey','==', mk));
                     const snap = await window.FirebaseLib.getDocs(qDup);
                     if (snap.empty) {
@@ -389,7 +376,6 @@
             if (e.split === 'Dividido') { pG += val/2; pT += val/2; }
             else if (e.split === 'Guilherme') pG += val;
             else if (e.split === 'Thais') pT += val;
-
             if (e.type === 'Cartão') {
                 const owner = ownerFromPaymentSource(e.paymentSource);
                 if (owner === 'Guilherme') paidG += val;
@@ -437,6 +423,7 @@
         return { grandTotal: round2(tot), gCard: round2(g), tCard: round2(t), dCard: round2(d) };
       }, [expenses]);
 
+      /* ==== Ações ==== */
       const salvarLancamento = async () => {
         const val = parseMoney(fValor);
         if (!fDesc || !Number.isFinite(val)) return;
@@ -475,7 +462,6 @@
             const idxDate = header.findIndex(h => norm(h).includes('data'));
             const idxDesc = header.findIndex(h => norm(h).includes('desc'));
             const idxVal  = header.findIndex(h => norm(h).includes('valor'));
-            
             const mapped = [];
             for (const row of body) {
                 if (!row[idxDate] || !row[idxDesc]) continue;
@@ -713,13 +699,12 @@
         return onAuthStateChanged(auth, (u) => setReady(!!u));
       }, []);
 
-      // TRIGGER DA MIGRAÇÃO (Roda 1x quando o app carrega)
+      // TRIGGER DA MIGRAÇÃO (Roda 1x quando Auth e DB estão prontos)
       useEffect(() => {
-        if (!db) return;
+        if (!db || !ready) return; // Espera o login terminar
         if (localStorage.getItem('mkBackfillDone') === '1') return;
-        // Chama a função de backfill definida acima
         backfillAllMonthKeys(db).catch(err => console.error('Erro no backfill:', err));
-      }, [db]);
+      }, [db, ready]);
 
       if (!ready) return <div className="min-h-screen flex items-center justify-center text-slate-400 animate-pulse">Carregando...</div>;
       if (!currentUser) return <UserSelectionScreen onSelectUser={(u)=>{setCurrentUser(u); localStorage.setItem('meuAcertoUser', JSON.stringify(u));}} />;
