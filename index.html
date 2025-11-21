@@ -30,7 +30,8 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
     import { 
       getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, 
-      onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence 
+      onSnapshot, runTransaction, writeBatch, query, where, getDocs, 
+      enableIndexedDbPersistence, orderBy, limit, startAfter, documentId 
     } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
     import { 
       getAuth, signInAnonymously, onAuthStateChanged 
@@ -39,6 +40,7 @@
     window.FirebaseLib = {
       initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
       onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,
+      orderBy, limit, startAfter, documentId,
       getAuth, signInAnonymously, onAuthStateChanged
     };
   </script>
@@ -155,6 +157,50 @@
       return null;
     };
 
+    /* ========= MIGRATION UTILS (Backfill Global) ========= */
+    
+    async function backfillAllMonthKeys(db) {
+      const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;
+      
+      const expCol = collection(db, 'expenses');
+      let lastDoc = null;
+      let totalAtualizados = 0;
+
+      while (true) {
+        let constraints = [orderBy(documentId()), limit(500)];
+        if (lastDoc) constraints.push(startAfter(lastDoc));
+        
+        const q = query(expCol, ...constraints);
+        const snap = await getDocs(q);
+        
+        if (snap.empty) break;
+
+        const batch = writeBatch(db);
+        let changed = 0;
+
+        snap.docs.forEach(dSnap => {
+          const d = dSnap.data() || {};
+          if (!d.monthKey && d.date) {
+            const mk = monthKeyFromPtDate(d.date);
+            if (mk) {
+              batch.update(dSnap.ref, { monthKey: mk });
+              changed++;
+            }
+          }
+        });
+
+        if (changed > 0) {
+          await batch.commit();
+          totalAtualizados += changed;
+        }
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+      }
+
+      console.log(`[backfillAllMonthKeys] Total atualizados: ${totalAtualizados}`);
+      localStorage.setItem('mkBackfillDone', '1');
+    }
+
     /* ========= Components ========= */
 
     const Modal = ({ isOpen, onClose, children }) => {
@@ -186,24 +232,23 @@
     /* ========= Dashboard ========= */
 
     const Dashboard = ({ user, onLogout, db }) => {
-      // --- State Principal ---
-      const [expenses, setExpenses] = useState([]); // Somente do mês atual
+      const [expenses, setExpenses] = useState([]);
       const [installmentPlans, setInstallmentPlans] = useState([]);
-      const [monthsFromDb, setMonthsFromDb] = useState([]); // Lista de meses disponíveis
+      const [monthsFromDb, setMonthsFromDb] = useState([]);
       
-      const [currentMonth, setCurrentMonth] = useState(currentMonthKey);
+      // --- CORREÇÃO AQUI: Inicialização explícita e lazy ---
+      const [currentMonth, setCurrentMonth] = useState(() => currentMonthKey());
+      
       const [filterType, setFilterType] = useState('Todos');
       const [scope, setScope] = useState('geral');
 
-      // --- Modais e UI ---
       const [isAddOpen, setIsAddOpen] = useState(false);
       const [isImportOpen, setIsImportOpen] = useState(false);
       const [isClearOpen, setIsClearOpen] = useState(false);
       const [isDelOpen, setDelOpen] = useState(false);
+      
       const [delTarget, setDelTarget] = useState(null);
       const [deleting, setDeleting] = useState(false);
-      
-      // --- Importação e Forms ---
       const [importedExpenses, setImportedExpenses] = useState([]);
       const [isImporting, setIsImporting] = useState(false);
       const fileInputRef = useRef(null);
@@ -218,14 +263,12 @@
       const [salvando, setSalvando] = useState(false);
       const [editingId, setEditingId] = useState(null);
 
-      // --- Firebase Globals ---
       const { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, runTransaction, writeBatch, query, where } = window.FirebaseLib;
 
       const theme = user === 'Thais' 
         ? { text:'text-pink-600', bg:'bg-pink-600', hover:'hover:bg-pink-700' }
         : { text:'text-indigo-600', bg:'bg-indigo-600', hover:'hover:bg-indigo-700' };
 
-      // --- Máscara de valor ---
       const valorRef = useRef(null);
       const formatBRLInput = (digits, negative=false) => {
         const n = (Number(digits) || 0) / 100;
@@ -240,9 +283,7 @@
         setFValor(formatBRLInput(digits, negative));
       };
 
-      // ================== LISTENERS OTIMIZADOS ==================
-
-      // 1. Listener de PLANOS (Sempre ouve tudo, pois é leve e necessário para geração)
+      // 1. Listener de PLANOS
       useEffect(() => {
         if (!db) return;
         const plansRef = collection(db, 'installmentPlans');
@@ -250,11 +291,10 @@
         return () => unsub();
       }, [db]);
 
-      // 2. Listener de MESES DISPONÍVEIS (Para popular o dropdown sem baixar todas as despesas)
+      // 2. Listener de MESES
       useEffect(() => {
         if (!db) return;
         const expRef = collection(db, 'expenses');
-        // Ouve a coleção inteira, mas processa apenas chaves (Firebase SDK baixa o doc, mas em app pequeno ok)
         const unsub = onSnapshot(expRef, (s) => {
            const set = new Set();
            s.forEach(d => { const mk = d.data().monthKey; if(mk) set.add(mk); });
@@ -263,44 +303,20 @@
         return () => unsub();
       }, [db]);
 
-      // 3. Listener de DESPESAS (Ouve APENAS o mês atual -> Fim do Flickering)
+      // 3. Listener de DESPESAS (Filtro por Mês)
       useEffect(() => {
         if (!db || !currentMonth) return;
         const expRef = collection(db, 'expenses');
         const q = query(expRef, where('monthKey', '==', currentMonth));
-        
         const unsub = onSnapshot(q, (s) => {
             setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })));
         });
         return () => unsub();
       }, [db, currentMonth]);
 
-      // ================== LÓGICA DE NEGÓCIO (CORREÇÕES) ==================
-
-      // A) Migração de MonthKey (Roda uma vez por sessão para não travar boot)
-      useEffect(() => {
-         if (!db || !expenses.length) return;
-         if (localStorage.getItem('mkMigrated') === '1') return;
-
-         const toFix = expenses.filter(e => !e.monthKey && e.date);
-         if (!toFix.length) { localStorage.setItem('mkMigrated','1'); return; }
-
-         const batch = writeBatch(db);
-         const expRef = collection(db, 'expenses');
-         let count = 0;
-         toFix.forEach(e => {
-            const mk = monthKeyFromPtDate(e.date);
-            if (mk) { batch.update(doc(expRef, e.id), { monthKey: mk }); count++; }
-         });
-         batch.commit().then(() => {
-            if (count > 0) localStorage.setItem('mkMigrated','1');
-         }).catch(console.error);
-      }, [expenses, db]);
-
-      // B) Geração de Parcelas DECOUPLED (Sem dependência de 'expenses' para evitar loop)
+      // Geração de Parcelas
       useEffect(() => {
         if (!installmentPlans.length || !db) return;
-        
         const generate = async () => {
             const expCol = collection(db, 'expenses');
             const batch = writeBatch(db);
@@ -308,10 +324,8 @@
 
             for (const plan of installmentPlans) {
                 if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
-                
                 const [dd, mm, yyyy] = String(plan.startDate).split('/').map(Number);
                 const start = new Date(yyyy, mm - 1, dd, 12);
-                
                 const deletedSet = new Set(plan.deletedParcels || []);
                 const per = round2(plan.totalAmount / plan.numberOfInstallments);
                 const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1));
@@ -325,28 +339,15 @@
                     const dateStr = d.toLocaleDateString('pt-PT', { timeZone: 'UTC' });
                     const amount = (i+1) === plan.numberOfInstallments ? last : per;
 
-                    // Dedupe via consulta direta (barata e evita loop de state)
-                    const qDup = query(
-                        expCol,
-                        where('installmentPlanId','==', plan.id),
-                        where('parcela','==', parcelaKey),
-                        where('monthKey','==', mk)
-                    );
+                    const qDup = query(expCol, where('installmentPlanId','==', plan.id), where('parcela','==', parcelaKey), where('monthKey','==', mk));
                     const snap = await window.FirebaseLib.getDocs(qDup);
-                    
                     if (snap.empty) {
                         const newRef = doc(expCol);
                         batch.set(newRef, {
-                            installmentPlanId: plan.id,
-                            description: plan.description,
-                            amount,
-                            date: dateStr,
-                            parcela: parcelaKey,
-                            split: plan.split || 'Dividido',
-                            type: plan.type || 'Cartão',
-                            paymentSource: plan.paymentSource || 'Cartão',
-                            paidBy: 'Cartão',
-                            monthKey: mk
+                            installmentPlanId: plan.id, description: plan.description, amount,
+                            date: dateStr, parcela: parcelaKey, split: plan.split || 'Dividido',
+                            type: plan.type || 'Cartão', paymentSource: plan.paymentSource || 'Cartão',
+                            paidBy: 'Cartão', monthKey: mk
                         });
                         hasWrites = true;
                     }
@@ -355,10 +356,9 @@
             if (hasWrites) await batch.commit();
         };
         generate();
-      }, [installmentPlans, db]); // Dependência removida: expenses
+      }, [installmentPlans, db]);
 
       /* ==== Derivados ==== */
-      
       const availableMonths = useMemo(() => {
         const set = new Set(monthsFromDb);
         set.add(currentMonth);
@@ -382,7 +382,6 @@
         });
       }, [expenses, filterType]);
 
-      // Totais
       const { partG, partT, gPaid, tPaid } = useMemo(() => {
         let pG = 0, pT = 0, paidG = 0, paidT = 0;
         for (const e of expensesForScope) {
@@ -438,25 +437,19 @@
         return { grandTotal: round2(tot), gCard: round2(g), tCard: round2(t), dCard: round2(d) };
       }, [expenses]);
 
-      /* ==== Actions ==== */
-
       const salvarLancamento = async () => {
         const val = parseMoney(fValor);
         if (!fDesc || !Number.isFinite(val)) return;
         const mk = monthKeyFromPtDate(fData) || currentMonth;
-
         setSalvando(true);
         const expRef = collection(db, 'expenses');
         const payload = {
             description: fDesc, amount: val, date: fData, 
             split: fTipo==='Ajuste'?'Thais':fSplit,
-            type: fTipo, 
-            paymentSource: fTipo==='Cartão'?fFonte:fTipo,
+            type: fTipo, paymentSource: fTipo==='Cartão'?fFonte:fTipo,
             paidBy: fTipo==='Cartão'?'Cartão':(fTipo==='Ajuste'?'Thais':user),
-            monthKey: mk,
-            parcela: fParcela || null
+            monthKey: mk, parcela: fParcela || null
         };
-
         try {
             if (editingId) await updateDoc(doc(expRef, editingId), payload);
             else await addDoc(expRef, payload);
@@ -478,7 +471,6 @@
             const wb = XLSX.read(data, { type: 'array' });
             const ws = wb.Sheets[wb.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            
             const [header, ...body] = rows;
             const idxDate = header.findIndex(h => norm(h).includes('data'));
             const idxDesc = header.findIndex(h => norm(h).includes('desc'));
@@ -490,17 +482,10 @@
                 const dateStr = excelSerialToPT(row[idxDate]);
                 const amount = parseMoney(row[idxVal]);
                 if (!Number.isFinite(amount)) continue;
-                
                 mapped.push({
-                    description: String(row[idxDesc]).trim(),
-                    amount: round2(amount),
-                    date: dateStr,
-                    type: 'Cartão',
-                    paymentSource: 'Cartão',
-                    split: 'Dividido',
-                    paidBy: 'Cartão',
-                    monthKey: monthKeyFromPtDate(dateStr) || currentMonth,
-                    parcela: null
+                    description: String(row[idxDesc]).trim(), amount: round2(amount),
+                    date: dateStr, type: 'Cartão', paymentSource: 'Cartão', split: 'Dividido', paidBy: 'Cartão',
+                    monthKey: monthKeyFromPtDate(dateStr) || currentMonth, parcela: null
                 });
             }
             setImportedExpenses(mapped);
@@ -512,20 +497,13 @@
 
       const confirmImport = async () => {
         if (!importedExpenses.length) return;
-        
-        // Dedupe melhorado: verifica no state atual (já que import costuma ser do mês atual)
         const existingKeys = new Set(expenses.map(makeDedupeKey));
-        
         const batch = writeBatch(db);
         const expRef = collection(db, 'expenses');
         let count = 0;
-        
         importedExpenses.forEach(imp => {
             const key = makeDedupeKey(imp);
-            if (!existingKeys.has(key)) {
-                batch.set(doc(expRef), imp);
-                count++;
-            }
+            if (!existingKeys.has(key)) { batch.set(doc(expRef), imp); count++; }
         });
         if (count > 0) await batch.commit();
         setIsImportOpen(false);
@@ -564,23 +542,18 @@
          setIsClearOpen(false);
       };
 
-      /* ==== UI Render ==== */
+      /* ==== UI ==== */
       return (
         <div className="min-h-screen flex flex-col pb-12">
             <header className="bg-white dark:bg-slate-800 shadow-sm px-4 py-3 flex justify-between items-center sticky top-0 z-10">
                 <div className="flex items-center gap-2">
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold ${theme.bg}`}>{user[0]}</div>
-                    <div>
-                        <h1 className="font-bold text-sm sm:text-base">Meu Acerto</h1>
-                        <p className="text-xs text-slate-500">Mês: {monthLabel(currentMonth)}</p>
-                    </div>
+                    <div><h1 className="font-bold text-sm sm:text-base">Meu Acerto</h1><p className="text-xs text-slate-500">Mês: {monthLabel(currentMonth)}</p></div>
                 </div>
                 <div className="flex items-center gap-2">
                    <div className="hidden sm:flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
                        {['geral','cartao','pixboleto'].map(s => (
-                           <button key={s} onClick={()=>setScope(s)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${scope===s ? 'bg-white dark:bg-slate-600 shadow text-indigo-600' : 'text-slate-500'}`}>
-                               {s==='geral'?'Geral':s==='cartao'?'Cartão':'Pix'}
-                           </button>
+                           <button key={s} onClick={()=>setScope(s)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${scope===s ? 'bg-white dark:bg-slate-600 shadow text-indigo-600' : 'text-slate-500'}`}>{s==='geral'?'Geral':s==='cartao'?'Cartão':'Pix'}</button>
                        ))}
                    </div>
                    <button onClick={onLogout} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200">
@@ -590,7 +563,6 @@
             </header>
 
             <main className="max-w-5xl mx-auto w-full p-4 space-y-4">
-                {/* Navegação de Mês */}
                 <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 rounded-xl shadow-sm">
                     <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, -1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full">◀</button>
                     <div className="flex items-center gap-2">
@@ -601,39 +573,19 @@
                     <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, 1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full">▶</button>
                 </div>
 
-                {/* Cards Resumo */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
                         <p className="text-xs text-slate-500 mb-1">Divisão ({scope})</p>
-                        <div className="flex justify-between items-end mb-1">
-                            <span className="text-sm">Guilherme</span>
-                            <span className="font-bold">{formatBRL(partG)}</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <span className="text-sm">Thais</span>
-                            <span className="font-bold">{formatBRL(partT)}</span>
-                        </div>
-                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500">
-                            <span>Diferença</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(difGastos)}</span>
-                        </div>
+                        <div className="flex justify-between items-end mb-1"><span className="text-sm">Guilherme</span><span className="font-bold">{formatBRL(partG)}</span></div>
+                        <div className="flex justify-between items-end"><span className="text-sm">Thais</span><span className="font-bold">{formatBRL(partT)}</span></div>
+                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500"><span>Diferença</span><span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(difGastos)}</span></div>
                     </div>
-
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
                         <p className="text-xs text-slate-500 mb-1">Pagamentos ({scope})</p>
-                        <div className="flex justify-between items-end mb-1">
-                            <span className="text-sm">Guilherme</span>
-                            <span className="font-bold text-emerald-600">{formatBRL(gPaid)}</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <span className="text-sm">Thais</span>
-                            <span className="font-bold text-emerald-600">{formatBRL(tPaid)}</span>
-                        </div>
-                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500">
-                            Se {user} quitar tudo: <span className="font-semibold">{formatBRL(valorDevolverSePagarTudo)}</span>
-                        </div>
+                        <div className="flex justify-between items-end mb-1"><span className="text-sm">Guilherme</span><span className="font-bold text-emerald-600">{formatBRL(gPaid)}</span></div>
+                        <div className="flex justify-between items-end"><span className="text-sm">Thais</span><span className="font-bold text-emerald-600">{formatBRL(tPaid)}</span></div>
+                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500">Se {user} quitar tudo: <span className="font-semibold">{formatBRL(valorDevolverSePagarTudo)}</span></div>
                     </div>
-
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-bl-full -mr-4 -mt-4"></div>
                         <p className="text-xs text-slate-500 mb-1">Saldo Geral (Thais → Gui)</p>
@@ -642,7 +594,6 @@
                     </div>
                 </div>
 
-                {/* Toolbar */}
                 <div className="flex gap-2 overflow-x-auto pb-2">
                     <button onClick={()=>setIsAddOpen(true)} className={`flex-shrink-0 px-4 py-2 rounded-xl text-white font-semibold shadow ${theme.bg} ${theme.hover}`}>+ Novo</button>
                     <button onClick={()=>fileInputRef.current?.click()} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-slate-600 dark:text-slate-300 hover:bg-slate-50">Importar</button>
@@ -650,7 +601,6 @@
                     <button onClick={()=>setIsClearOpen(true)} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-red-500 hover:bg-red-50">Limpar</button>
                 </div>
 
-                {/* Lista */}
                 <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden">
                     <div className="flex gap-2 p-3 border-b border-slate-100 dark:border-slate-700 overflow-x-auto">
                          {['Todos','Cartão','Pix','Boleto','Ajuste'].map(f => (
@@ -666,9 +616,7 @@
                                         <span className="font-semibold text-sm truncate">{e.description}</span>
                                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{e.type}</span>
                                     </div>
-                                    <div className="text-xs text-slate-500 truncate mt-0.5">
-                                        {e.date} • {e.paymentSource} {e.parcela && `• ${e.parcela}`}
-                                    </div>
+                                    <div className="text-xs text-slate-500 truncate mt-0.5">{e.date} • {e.paymentSource} {e.parcela && `• ${e.parcela}`}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className={`font-bold text-sm ${e.amount < 0 ? 'text-emerald-500' : ''}`}>{formatBRL(e.amount)}</div>
@@ -695,9 +643,7 @@
                     </div>
                     {fTipo==='Cartão' && <select className="w-full p-2 border rounded" value={fFonte} onChange={e=>setFFonte(e.target.value)}><option>Cartão Guilherme (final 2581)</option><option>Cartão Thais (final 1009)</option><option>Cartão Digital (final 7292)</option></select>}
                     {fTipo==='Cartão' && <input className="w-full p-2 border rounded" placeholder="Parcela (ex: 1/10)" value={fParcela} onChange={e=>setFParcela(e.target.value)} />}
-                    <div className="flex justify-end gap-2 pt-2">
-                        <button onClick={salvarLancamento} disabled={salvando} className={`px-4 py-2 rounded text-white ${theme.bg}`}>Salvar</button>
-                    </div>
+                    <div className="flex justify-end gap-2 pt-2"><button onClick={salvarLancamento} disabled={salvando} className={`px-4 py-2 rounded text-white ${theme.bg}`}>Salvar</button></div>
                 </div>
             </Modal>
             
@@ -766,6 +712,14 @@
         signInAnonymously(auth).catch(console.error);
         return onAuthStateChanged(auth, (u) => setReady(!!u));
       }, []);
+
+      // TRIGGER DA MIGRAÇÃO (Roda 1x quando o app carrega)
+      useEffect(() => {
+        if (!db) return;
+        if (localStorage.getItem('mkBackfillDone') === '1') return;
+        // Chama a função de backfill definida acima
+        backfillAllMonthKeys(db).catch(err => console.error('Erro no backfill:', err));
+      }, [db]);
 
       if (!ready) return <div className="min-h-screen flex items-center justify-center text-slate-400 animate-pulse">Carregando...</div>;
       if (!currentUser) return <UserSelectionScreen onSelectUser={(u)=>{setCurrentUser(u); localStorage.setItem('meuAcertoUser', JSON.stringify(u));}} />;
