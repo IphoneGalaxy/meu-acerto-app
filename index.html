@@ -1,1610 +1,1642 @@
-<!DOCTYPE html>  <html lang="pt-PT">  
-<head>  
-  <meta charset="UTF-8" />  
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />  
-  <title>Meu Acerto</title>    <!-- PWA -->    <link rel="manifest" href="manifest.json" />  
-  <meta name="apple-mobile-web-app-capable" content="yes" />  
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />  
-  <meta name="apple-mobile-web-app-title" content="Meu Acerto" />  
-  <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />    <!-- Theme Colors -->    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">  
-  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">    <!-- UI -->    <script src="https://cdn.tailwindcss.com"></script>    <script>  
-    tailwind.config = { darkMode: 'media' }  
-  </script>    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />    <!-- React -->    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>    <!-- SheetJS -->    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>    <!-- Firebase Modular SDK -->    <script type="module">  
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";  
-    import {   
-      getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,  
-      onSnapshot, runTransaction, writeBatch, query, where, getDocs,   
-      enableIndexedDbPersistence, orderBy, limit, startAfter, documentId   
-    } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";  
-    import {   
-      getAuth, signInAnonymously, onAuthStateChanged   
-    } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";  
-  
-    window.FirebaseLib = {  
-      initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,  
-      onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,  
-      orderBy, limit, startAfter, documentId,  
-      getAuth, signInAnonymously, onAuthStateChanged  
-    };  
-  </script>    <style>  
-    body { font-family: 'Inter', sans-serif; }  
-    .modal-enter { animation: fadeIn .2s ease-out; }  
-    @keyframes fadeIn { from { opacity: 0; transform: scale(.98);} to { opacity: 1; transform: scale(1);} }  
-  </style>  </head>  
-<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300">  
-  <div id="root"></div>    <script type="text/babel" data-presets="env,react">  
-    const { useState, useEffect, useMemo, useRef } = React;  
-    const { createRoot } = ReactDOM;  
-  
-    /* ========= Styles Object ========= */  
-    const ui = {  
-      modal: "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl p-6 max-w-md w-full m-4",  
-      label: "block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1",  
-      input: "w-full rounded-xl border px-4 py-3 text-sm bg-white text-slate-900 placeholder-slate-400 " +  
-             "border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +  
-             "dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:border-slate-700",  
-      select: "w-full rounded-xl border px-4 py-3 text-sm bg-white text-slate-900 " +  
-              "border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +  
-              "dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700",  
-      btnPrimary: "rounded-xl px-5 py-3 bg-pink-600 hover:bg-pink-700 text-white font-semibold shadow-md hover:shadow-lg transition-all " +  
-                  "dark:bg-pink-600 dark:hover:bg-pink-500",  
-      btnGhost: "rounded-xl px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 " +  
-                "dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"  
-    };  
-  
-    /* ========= Helpers ========= */  
-    const norm = (s) =>   
-      String(s || "")  
-        .normalize("NFD")  
-        .replace(/[\u0300-\u036f]/g, "")  
-        .trim()  
-        .toLowerCase();  
-  
-    const canonicalSplit = (s) => {  
-      const n = norm(s);  
-      if (n.includes('guilherme')) return 'Guilherme';  
-      if (n.includes('thais')) return 'Thais';  
-      return 'Dividido';  
-    };  
-  
-    const uiOwner = (e) => {  
-      const s = norm(e.split);  
-      if (s === "guilherme" || s === "thais") return s;  
-      const who = norm(e.paidBy || e.owner || e.user || e.person || e.responsavel);  
-      if (who === "guilherme" || who === "thais") return who;  
-      return "dividido";  
-    };  
-  
-    const stripeBySplit = (e) => {  
-      const owner = uiOwner(e);  
-      const base = "before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-1.5 before:rounded-full";  
-      if (owner === "guilherme") return base + " before:bg-indigo-500";  
-      if (owner === "thais")     return base + " before:bg-pink-500";  
-      return "";  
-    };  
-  
-    const shouldIgnorePaymentInclusion = (row, chosenDesc) => {  
-      const normLocal = (s) => String(s || "")  
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  
-        .toLowerCase().trim();  
-      const haystack = [chosenDesc, ...row].map(normLocal).join(" ");  
-      return /\binclusao\s+de\s+pagament/.test(haystack);  
-    };  
-  
-    // --- IMPORT HELPER ---  
-    async function readSpreadsheetFile(file) {  
-      const isXlsx = /\.(xlsx?|xls)$/i.test(file.name);  
-      const data = await new Promise((resolve, reject) => {  
-        const r = new FileReader();  
-        r.onload = () => resolve(r.result);  
-        r.onerror = reject;  
-        if (isXlsx) r.readAsArrayBuffer(file); else r.readAsText(file, "utf-8");  
-      });  
-  
-      if (!isXlsx) {  
-        const wb = XLSX.read(data, { type: "string" });  
-        const ws = wb.Sheets[wb.SheetNames[0]];  
-        return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false, blankrows: false });  
-      }  
-  
-      const wb = XLSX.read(data, { type: "array" });  
-      let best = [], bestLen = -1;  
-      for (const name of wb.SheetNames) {  
-        const ws = wb.Sheets[name];  
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false, blankrows: false });  
-        const filled = rows.filter(r => (r || []).some(c => String(c||'').trim() !== '')).length;  
-        if (filled > bestLen) { bestLen = filled; best = rows; }  
-      }  
-      return best;  
-    }  
-  
-    // --- PARSER DE PARCELA (ATUALIZADO V2) ---  
-    function parseInstallmentFromCell(cellValue) {  
-      if (cellValue == null || cellValue === '') {  
-        return { isInstallment: false };  
-      }  
-  
-      // 1. Se o Excel converteu "1/10" em número (ex.: 0.1)  
-      if (typeof cellValue === 'number') {  
-        const v = cellValue;  
-  
-        // Só faz sentido tentar fração se for entre 0 e 1 (evita pegar 1, 2, 3...)  
-        if (v > 0 && v < 1) {  
-          for (let d = 2; d <= 60; d++) {  
-            const n = Math.round(v * d);  
-            if (Math.abs(v - n / d) < 0.0001) {  
-              if (n >= 1 && n <= d) {  
-                return {  
-                  isInstallment: true,  
-                  info: `${n}/${d}`,  
-                  current: n,  
-                  total: d,  
-                };  
-              }  
-            }  
-          }  
-        }  
-  
-        return { isInstallment: false };  
-      }  
-  
-      let raw = String(cellValue).trim();  
-      let normalized = raw  
-        .normalize('NFD')  
-        .replace(/[\u0300-\u036f]/g, '')  
-        .toLowerCase();  
-  
-      // valores que significam "não é parcelado"  
-      if (  
-        normalized === 'unica' ||  
-        normalized === 'única' ||  
-        normalized === 'a vista' ||  
-        normalized === 'avista'  
-      ) {  
-        return { isInstallment: false };  
-      }  
-  
-      // 2. Padrões tipo "1/10", "02/12", "1 de 10", "1 DE 10"  
-      const match =  
-        raw.match(/^(\d+)\s*[\/\\]\s*(\d+)$/) ||  
-        raw.match(/^(\d+)\s*(?:de|DE|of)\s*(\d+)$/);  
-  
-      if (match) {  
-        const current = parseInt(match[1], 10);  
-        const total = parseInt(match[2], 10);  
-        if (  
-          Number.isFinite(current) &&  
-          Number.isFinite(total) &&  
-          total > 1 &&  
-          current >= 1 &&  
-          current <= total  
-        ) {  
-          return {  
-            isInstallment: true,  
-            info: `${current}/${total}`,  
-            current,  
-            total,  
-          };  
-        }  
-      }  
-  
-      return { isInstallment: false };  
-    }  
-  
-    // --- FALLBACK: Varredura de Linha (Conservador) ---  
-    // Aqui NÃO aceitamos data, para não confundir a coluna de Data com parcela  
-    const extractParcelaFromText = (text) => {  
-      if (!text) return null;  
-      let s = String(text).normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();  
-        
-      // Remove datas completas  
-      s = s.replace(/\b\d{1,2}\s*[\/\-]\s*\d{1,2}\s*[\/\-]\s*\d{2,4}\b/g, " ");   
-  
-      let m = s.match(/\b(\d{1,2})\s*[\/\\]\s*(\d{1,2})\b/);  
-      if (m && parseInt(m[1]) <= parseInt(m[2]) && parseInt(m[2]) > 1) return `${parseInt(m[1])}/${parseInt(m[2])}`;  
-        
-      m = s.match(/\b(\d{1,2})\s*(?:de|of)\s*(\d{1,2})\b/);  
-      if (m && parseInt(m[1]) <= parseInt(m[2]) && parseInt(m[2]) > 1) return `${parseInt(m[1])}/${parseInt(m[2])}`;  
-  
-      return null;  
-    };  
-  
-    const parcelaFromRowFallback = (row) => {  
-      for (const c of row) {  
-        const p = extractParcelaFromText(c);  
-        if (p) return p;  
-      }  
-      return null;  
-    };  
-  
-    // --- HELPER DE DETECÇÃO DE LINHA INTEIRA (V2 - com heurística de colunas adjacentes) ---  
-    function detectInstallmentForRow(row = [], cols = {}) {  
-      // 1. Se temos uma coluna claramente de parcela, usar ela primeiro  
-      if (typeof cols.idxParcela === 'number' && cols.idxParcela >= 0) {  
-        const directInfo = parseInstallmentFromCell(row[cols.idxParcela]);  
-        if (directInfo.isInstallment) return directInfo;  
-  
-        // 1b. Heurística: "Parcela" em uma coluna e "Qtd Parcelas" na coluna logo ao lado  
-        const curCell = row[cols.idxParcela];  
-        const totalCell = row[cols.idxParcela + 1];  
-  
-        const toNum = (v) => {  
-          if (v == null || v === '') return NaN;  
-          if (typeof v === 'number') return v;  
-          const s = String(v).replace(/[^\d]/g, '');  
-          return s ? Number(s) : NaN;  
-        };  
-  
-        const curNum = toNum(curCell);  
-        const totNum = toNum(totalCell);  
-  
-        if (  
-          Number.isFinite(curNum) &&  
-          Number.isFinite(totNum) &&  
-          totNum > 1 &&  
-          curNum >= 1 &&  
-          curNum <= totNum  
-        ) {  
-          return {  
-            isInstallment: true,  
-            info: `${curNum}/${totNum}`,  
-            current: curNum,  
-            total: totNum,  
-          };  
-        }  
-      }  
-  
-      // Índices que não fazem sentido para parcela  
-      const skip = new Set(  
-        [cols.idxData, cols.idxDescricao, cols.idxValorBRL, cols.idxValorGen, cols.idxTitular]  
-          .filter((i) => typeof i === 'number' && i >= 0)  
-      );  
-  
-      // 2. Varre as outras colunas procurando algo que pareça "1/10", "2 de 5" etc.  
-      for (let i = 0; i < row.length; i++) {  
-        if (skip.has(i)) continue;  
-        const info = parseInstallmentFromCell(row[i]);  
-        if (info.isInstallment) return info;  
-      }  
-  
-      // 3. Fallback extra com o extrator antigo (mais permissivo)  
-      const pText = parcelaFromRowFallback(row);  
-      if (pText) {  
-        const [cur, tot] = pText.split('/').map(Number);  
-        if (Number.isFinite(cur) && Number.isFinite(tot) && tot > 1 && cur >= 1 && cur <= tot) {  
-          return {  
-            isInstallment: true,  
-            info: pText,  
-            current: cur,  
-            total: tot,  
-          };  
-        }  
-      }  
-  
-      return { isInstallment: false };  
-    }  
-  
-    const last4FromRow = (row = []) => {  
-      for (const cell of row) {  
-        const raw = String(cell ?? '');  
-        const s = raw.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();  
-        let m = s.match(/\bfinal\s*(\d{4})\b/);  
-        if (m) return m[1];  
-        m = s.match(/(?:\*{2,}|x{3,}|xxxx)\s*(\d{4})\b/);  
-        if (m) return m[1];  
-        if (/\b2581\b/.test(s)) return '2581';  
-        if (/\b1009\b/.test(s)) return '1009';  
-        if (/\b7292\b/.test(s)) return '7292';  
-        m = s.match(/\b(?!20\d{2}\b)(\d{4})\b/);  
-        if (m) return m[1];  
-      }  
-      return null;  
-    };  
-  
-    const parseMoney = (input) => {  
-      if (input == null) return NaN;  
-      if (typeof input === 'number') return input;  
-      let s = String(input).replace(/\u00a0/g, ' ').replace(/[^\d.,\-()]/g, '').trim();  
-      if (!s) return NaN;  
-      let neg = false;  
-      if (/^.*$/.test(s)) { neg = true; s = s.slice(1, -1); }  
-      else if (/-$/.test(s))  { neg = true; s = s.slice(0, -1); }  
-      else if (s.startsWith('-')) { neg = true; s = s.slice(1); }  
-      const lastComma = s.lastIndexOf(',');  
-      const lastDot   = s.lastIndexOf('.');  
-      if (lastComma > lastDot) { s = s.replace(/\./g, '').replace(',', '.'); }   
-      else { s = s.replace(/,/g, ''); }  
-      const n = parseFloat(s);  
-      return Number.isFinite(n) ? (neg ? -n : n) : NaN;  
-    };  
-  
-    const excelSerialToPT = (v) => {  
-      if (typeof v === 'number') {  
-        const ms = Math.round((v - 25569) * 86400 * 1000);  
-        return new Date(ms).toLocaleDateString('pt-PT', { timeZone: 'UTC' });  
-      }  
-      if (typeof v === 'string') {  
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;  
-        if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT', { timeZone: 'UTC' });  
-        const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);  
-        if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/20${m[3]}`;  
-      }  
-      return new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });  
-    };  
-  
-    const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL'}).format(v || 0);  
-    const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;  
-  
-    const ptDateToDateObj = (pt) => {  
-      const m = String(pt || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);  
-      if (!m) return null;  
-      return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12);  
-    };  
-  
-    const monthKeyFromPtDate = (pt) => {  
-      const m = String(pt || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);  
-      if (!m) return null;  
-      return `${m[3]}-${m[2].padStart(2,'0')}`;  
-    };  
-  
-    const monthKeyFromDateObj = (d) => {  
-      const yyyy = d.getFullYear();  
-      const mm = String(d.getMonth() + 1).padStart(2,'0');  
-      return `${yyyy}-${mm}`;  
-    };  
-  
-    const currentMonthKey = () => monthKeyFromDateObj(new Date());  
-  
-    const monthLabel = (monthKey) => {  
-      if (!monthKey) return '';  
-      const [yyyy, mm] = monthKey.split('-').map(Number);  
-      const d = new Date(yyyy, mm - 1, 1);  
-      const nomeMes = d.toLocaleDateString('pt-BR', { month: 'long' });  
-      return `${nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1)} ${yyyy}`;  
-    };  
-  
-    const shiftMonthKey = (monthKey, delta) => {  
-      if (!monthKey) return currentMonthKey();  
-      const [yyyy, mm] = monthKey.split('-').map(Number);  
-      const d = new Date(yyyy, mm - 1 + delta, 1);  
-      return monthKeyFromDateObj(d);  
-    };  
-  
-    const ownerFromPaymentSource = (src) => {  
-      const s = norm(src);  
-      if (!s) return null;  
-      if (s.includes('2581') || s.includes('guilherme')) return 'Guilherme';  
-      if (s.includes('1009') || s.includes('thais')) return 'Thais';  
-      if (s.includes('7292') || s.includes('digital')) return 'Ambos';  
-      return null;  
-    };  
-  
-    // --- DETECÇÃO DE COLUNAS (Flexível) ---  
-    const detectColumns = (headerRow = []) => {  
-      const h = headerRow.map(norm);  
-      const find = (re) => h.findIndex((x) => re.test(x));  
-      return {  
-        idxDescricao: find(/^(descricao|descrição|estabelecimento|historico|histórico|loja|detalhe)/),  
-        // Remove ^ para pegar "Qtd Parcelas", "Nº Parcela", etc.  
-        idxParcela:   find(/(parcela|parcelas|prest|n\S* parc|qtd.*parc)/),   
-        idxData:      find(/^(data|lan[cç]amento|transa[cç][aã]o)/),  
-        idxValorBRL:  find(/^(valor.*r\$|valor ?em r\$??)/),  
-        idxValorGen:  find(/^(valor|amount|total|d[eé]bito|cr[eé]dito)/),  
-        idxTitular:   find(/(titular|portador|nome do titular|cliente)/),  
-      };  
-    };  
-  
-    const getDescriptionFromRow = (row = [], cols) => {  
-      let desc = cols.idxDescricao >= 0 ? row[cols.idxDescricao] : "";  
-      if (!String(desc || "").trim()) {  
-        const titular = cols.idxTitular >= 0 ? String(row[cols.idxTitular] || "") : "";  
-        let best = "";  
-        for (const cell of row) {  
-          const s = String(cell || "").trim();  
-          if (s.length >= 3 && s !== titular && !/r\$\s*\d/.test(s) && !/^\d{1,2}\/\d{1,2}/.test(s)) {  
-            if (s.length > best.length) best = s;  
-          }  
-        }  
-        desc = best;  
-      }  
-      desc = String(desc || "").replace(/\s+/g, " ").trim();  
-      const titular = cols.idxTitular >= 0 ? String(row[cols.idxTitular] || "") : "";  
-      if (desc && titular && norm(desc) === norm(titular)) {  
-        for (const cell of row) {  
-          const s = String(cell || "").trim();  
-          if (s && norm(s) !== norm(titular) && s.length > 3 && !/r\$\s*\d/.test(s)) {  
-            desc = s; break;  
-          }  
-        }  
-      }  
-      return desc;  
-    };  
-  
-    /* ========= MIGRATION UTILS ========= */  
-    async function backfillAllMonthKeys(db) {  
-      if (!window.FirebaseLib) return;  
-      const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;  
-      const expCol = collection(db, 'expenses');  
-      let lastDoc = null;  
-      let totalAtualizados = 0;  
-      while (true) {  
-        let constraints = [orderBy(documentId()), limit(500)];  
-        if (lastDoc) constraints.push(startAfter(lastDoc));  
-        const q = query(expCol, ...constraints);  
-        const snap = await getDocs(q);  
-        if (snap.empty) break;  
-        const batch = writeBatch(db);  
-        let changed = 0;  
-        snap.docs.forEach(dSnap => {  
-          const d = dSnap.data() || {};  
-          if (!d.monthKey && d.date) {  
-            const mk = monthKeyFromPtDate(d.date);  
-            if (mk) { batch.update(dSnap.ref, { monthKey: mk }); changed++; }  
-          }  
-        });  
-        if (changed > 0) { await batch.commit(); totalAtualizados += changed; }  
-        lastDoc = snap.docs[snap.docs.length - 1];  
-      }  
-      if(totalAtualizados > 0) localStorage.setItem('mkBackfillDone', '1');  
-    }  
-  
-    async function backfillSplitFromPaidBy(db) {  
-      if (!window.FirebaseLib) return;  
-      const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;  
-      const expCol = collection(db, "expenses");  
-      let last = null, total = 0;  
-      while (true) {  
-        let constraints = [orderBy(documentId()), limit(500)];  
-        if (last) constraints.push(startAfter(last));  
-        const q = query(expCol, ...constraints);  
-        const snap = await getDocs(q);  
-        if (snap.empty) break;  
-        const batch = writeBatch(db);  
-        let changed = 0;  
-        snap.docs.forEach(doc => {  
-          const d = doc.data() || {};  
-          const current = norm(d.split);  
-          const who = norm(d.paidBy || d.owner || d.user || d.person || d.responsavel);  
-          if ((!current || current === "dividido") && (who === "guilherme" || who === "thais")) {  
-            const newSplit = who === "guilherme" ? "Guilherme" : "Thais";  
-            batch.update(doc.ref, { split: newSplit });  
-            changed++;  
-          }  
-        });  
-        if (changed > 0) { await batch.commit(); total += changed; }  
-        last = snap.docs[snap.docs.length - 1];  
-      }  
-      if(total > 0) localStorage.setItem('splitBackfillDone', '1');  
-    }  
-  
-    window.removeZeroAmountForMonth = async (db, currentMonth) => {  
-      if(!db || !currentMonth || !window.FirebaseLib) return;  
-      const { collection, query, where, getDocs, writeBatch } = window.FirebaseLib;  
-      const exp = collection(db, 'expenses');  
-      const snap = await getDocs(query(exp, where('monthKey','==', currentMonth)));  
-      const batch = writeBatch(db);  
-      let count = 0;  
-      snap.forEach(doc => {  
-        const d = doc.data();  
-        if (Number(d.amount) === 0) { batch.delete(doc.ref); count++; }  
-      });  
-      if (count) await batch.commit();  
-      console.log('Removidos com amount=0:', count);  
-    };  
-  
-    window.limparParcelasQueSaoData = async (db, monthKey) => {  
-      if(!db || !monthKey || !window.FirebaseLib) return;  
-      const { collection, query, where, getDocs, writeBatch, deleteField } = window.FirebaseLib;  
-      const exp = collection(db, 'expenses');  
-      const snap = await getDocs(query(exp, where('monthKey','==', monthKey)));  
-      const batch = writeBatch(db);  
-      let count = 0;  
-      snap.docs.forEach(doc => {  
-        const d = doc.data() || {};  
-        if (!d.parcela || !d.date) return;  
-        const m = String(d.date).match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}$/);  
-        if (!m) return;  
-        const diaMes = `${parseInt(m[1],10)}/${parseInt(m[2],10)}`;  
-        if (d.parcela === diaMes) {   
-            batch.update(doc.ref, { parcela: deleteField() });   
-            count++;   
-        }  
-      });  
-      if (count > 0) await batch.commit();  
-      console.log('Parcelas removidas (eram dia/mês da data):', count);  
-    };  
-  
-    /* ========= Components ========= */  
-    const Modal = ({ isOpen, onClose, children }) => {  
-      if (!isOpen) return null;  
-      return (  
-        <div className="fixed inset-0 bg-black/60 flex justify-center items-center p-4 z-50 modal-enter backdrop-blur-sm" onClick={onClose}>  
-          <div className={ui.modal} onClick={(e)=>e.stopPropagation()}>  
-            {children}  
-          </div>  
-        </div>  
-      );  
-    };  
-  
-    const UserSelectionScreen = ({ onSelectUser }) => (  
-      <div className="min-h-screen flex flex-col justify-center items-center p-6 bg-slate-50 dark:bg-slate-900">  
-        <h1 className="text-4xl font-bold mb-2 text-slate-800 dark:text-white">Meu Acerto</h1>  
-        <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>  
-        <div className="space-y-4 w-full max-w-xs">  
-          {['Guilherme', 'Thais'].map(u => (  
-            <button key={u} onClick={() => onSelectUser(u)}  
-              className={`w-full py-3 rounded-xl text-white font-semibold shadow-lg hover:brightness-110 transition-all hover:scale-105  
-                ${u === 'Thais' ? 'bg-pink-600' : 'bg-indigo-600'}`}>  
-              {u}  
-            </button>  
-          ))}  
-        </div>  
-      </div>  
-    );  
-  
-    /* ========= Dashboard ========= */  
-    const Dashboard = ({ user, onLogout, db }) => {  
-      const [expenses, setExpenses] = useState([]);  
-      const [installmentPlans, setInstallmentPlans] = useState([]);  
-      const [monthsFromDb, setMonthsFromDb] = useState([]);  
-        
-      const [currentMonth, setCurrentMonth] = useState(() => currentMonthKey());  
-        
-      const [filterType, setFilterType] = useState('Todos');  
-      const [scope, setScope] = useState('geral');  
-  
-      const [isAddOpen, setIsAddOpen] = useState(false);  
-      const [isImportOpen, setIsImportOpen] = useState(false);  
-      const [isClearOpen, setIsClearOpen] = useState(false);  
-      const [isDelOpen, setDelOpen] = useState(false);  
-        
-      const [delTarget, setDelTarget] = useState(null);  
-      const [deleting, setDeleting] = useState(false);  
-      const [importedExpenses, setImportedExpenses] = useState([]);  
-      const [isImporting, setIsImporting] = useState(false);  
-      const fileInputRef = useRef(null);  
-        
-      // Ensure refs are initialized  
-      const valorRef = useRef(null);  
-  
-      const formatBRLInput = (digits, negative=false) => {  
-        const n = (Number(digits) || 0) / 100;  
-        const fmt = n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });  
-        return negative ? `-${fmt}` : fmt;  
-      };  
-      const handleValorChange = (e) => {  
-        const raw = e.target.value;  
-        const negative = raw.trim().startsWith('-');  
-        const digits = raw.replace(/\D/g, '');  
-        if (!digits) { setFValor(negative ? '-' : ''); return; }  
-        setFValor(formatBRLInput(digits, negative));  
-      };  
-  
-      const [fDesc, setFDesc] = useState('');  
-      const [fValor, setFValor] = useState('');  
-      const [fData, setFData] = useState(() => new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));  
-      const [fTipo, setFTipo] = useState('Cartão');  
-      const [fSplit, setFSplit] = useState('Dividido');  
-      const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');  
-      const [fParcela, setFParcela] = useState('');  
-      const [salvando, setSalvando] = useState(false);  
-      const [editingId, setEditingId] = useState(null);  
-  
-      const fb = window.FirebaseLib;  
-      if (!fb) return null; // Safety check for render  
-  
-      const { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, runTransaction, writeBatch, query, where } = fb;  
-  
-      const theme = user === 'Thais'   
-        ? { text:'text-pink-600 dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700' }  
-        : { text:'text-indigo-600 dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700' };  
-  
-      // Listeners  
-      useEffect(() => {  
-        if (!db || !fb) return;  
-        const plansRef = collection(db, 'installmentPlans');  
-        const unsub = onSnapshot(plansRef, (s) => setInstallmentPlans(s.docs.map(d => ({ id: d.id, ...d.data() }))));  
-        return () => unsub();  
-      }, [db]);  
-  
-      useEffect(() => {  
-        if (!db || !fb) return;  
-        const expRef = collection(db, 'expenses');  
-        const unsub = onSnapshot(expRef, (s) => {  
-           const set = new Set();  
-           s.forEach(d => { const mk = d.data().monthKey; if(mk) set.add(mk); });  
-           setMonthsFromDb(Array.from(set).sort());  
-        });  
-        return () => unsub();  
-      }, [db]);  
-  
-      useEffect(() => {  
-        if (!db || !currentMonth || !fb) return;  
-        const expRef = collection(db, 'expenses');  
-        const q = query(expRef, where('monthKey', '==', currentMonth));  
-        const unsub = onSnapshot(q, (s) => {  
-            setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })));  
-        });  
-        return () => unsub();  
-      }, [db, currentMonth]);  
-  
-      // Geração Parcelas  
-      useEffect(() => {  
-        if (!installmentPlans.length || !db || !fb) return;  
-        const generate = async () => {  
-            const expCol = collection(db, 'expenses');  
-            const batch = writeBatch(db);  
-            let hasWrites = false;  
-            for (const plan of installmentPlans) {  
-                if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;  
-                const [dd, mm, yyyy] = String(plan.startDate).split('/').map(Number);  
-                const start = new Date(yyyy, mm - 1, dd, 12);  
-                const deletedSet = new Set(plan.deletedParcels || []);  
-                const per = round2(plan.totalAmount / plan.numberOfInstallments);  
-                const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1));  
-                for (let i = 0; i < plan.numberOfInstallments; i++) {  
-                    const d = new Date(start.getFullYear(), start.getMonth() + i, start.getDate(), 12);  
-                    const parcelaKey = `${i+1}/${plan.numberOfInstallments}`;  
-                    if (deletedSet.has(parcelaKey)) continue;  
-                    const mk = monthKeyFromDateObj(d);  
-                    const dateStr = d.toLocaleDateString('pt-PT', { timeZone: 'UTC' });  
-                    const amount = (i+1) === plan.numberOfInstallments ? last : per;  
-                    const qDup = query(expCol, where('installmentPlanId','==', plan.id), where('parcela','==', parcelaKey), where('monthKey','==', mk));  
-                    const snap = await window.FirebaseLib.getDocs(qDup);  
-                    if (snap.empty) {  
-                        const newRef = doc(expCol);  
-                        batch.set(newRef, {  
-                            installmentPlanId: plan.id, description: plan.description, amount,  
-                            date: dateStr, parcela: parcelaKey, split: plan.split || 'Dividido',  
-                            type: plan.type || 'Cartão', paymentSource: plan.paymentSource || 'Cartão',  
-                            paidBy: 'Cartão', monthKey: mk,  
-                            // Auto-generated installments are marked as such  
-                            isInstallment: true,  
-                            installmentCurrent: i+1,  
-                            installmentTotal: plan.numberOfInstallments  
-                        });  
-                        hasWrites = true;  
-                    }  
-                }  
-            }  
-            if (hasWrites) await batch.commit();  
-        };  
-        generate();  
-      }, [installmentPlans, db]);  
-  
-      /* ==== Derivados ==== */  
-      const availableMonths = useMemo(() => {  
-        const set = new Set(monthsFromDb);  
-        set.add(currentMonth);  
-        return Array.from(set).sort();  
-      }, [monthsFromDb, currentMonth]);  
-  
-      const expensesForScope = useMemo(() => {  
-        let base = expenses;  
-        if (scope === 'cartao') base = base.filter(e => e.type === 'Cartão');  
-        else if (scope === 'pixboleto') base = base.filter(e => ['Pix', 'Boleto', 'Ajuste'].includes(e.type));  
-        return base;  
-      }, [expenses, scope]);  
-  
-      // --- FILTERED LIST (Agora usa visibleExpensesForScope) ---  
-        
-      const visibleExpensesForScope = useMemo(() => {  
-        return expensesForScope.filter(e => {  
-          if (!e.panelUser) return true; // docs antigos aparecem pra ambos  
-          return e.panelUser === user;  
-        });  
-      }, [expensesForScope, user]);  
-  
-      const filteredList = useMemo(() => {  
-        let base = visibleExpensesForScope;  
-        if (filterType !== 'Todos') {  
-            if (filterType === 'Parcelado') {  
-                base = base.filter(e => e.isInstallment || (e.installmentTotal && e.installmentTotal > 1));  
-            } else {  
-                base = base.filter(e => e.type === filterType);  
-            }  
-        }  
-        return base.sort((a,b) => {  
-            const da = ptDateToDateObj(a.date);  
-            const db = ptDateToDateObj(b.date);  
-            return (da && db) ? da - db : 0;  
-        });  
-      }, [visibleExpensesForScope, filterType]);  
-  
-      // --- TOTAIS (ATUALIZADO V2) ---  
-      const { partG, partT, gPaid, tPaid } = useMemo(() => {  
-        let pG = 0, pT = 0, paidG = 0, paidT = 0;  
-  
-        for (const e of expensesForScope) {  
-          const val = Number(e.amount || 0);  
-  
-          // 🌎 PARTE JUSTA (quanto cada um "gastou" nesse lançamento)  
-          if (e.split === 'Dividido') {  
-            pG += val / 2;  
-            pT += val / 2;  
-          } else if (e.split === 'Guilherme') {  
-            pG += val;  
-          } else if (e.split === 'Thais') {  
-            pT += val;  
-          }  
-  
-          // 💸 QUEM PAGOU DE FATO  
-          if (e.type === 'Cartão') {  
-            // Regra da vida real: Guilherme paga 100% de TODAS as faturas  
-            paidG += val;  
-          } else {  
-            // Pix / Boleto / Ajuste usam o campo paidBy  
-            if (e.paidBy === 'Guilherme') paidG += val;  
-            else if (e.paidBy === 'Thais') paidT += val;  
-          }  
-        }  
-  
-        return {  
-          partG: round2(pG),  
-          partT: round2(pT),  
-          gPaid: round2(paidG),  
-          tPaid: round2(paidT),  
-        };  
-      }, [expensesForScope]);  
-  
-      const difGastos = round2(partG - partT);  
-      const valorDevolverSePagarTudo = user === 'Guilherme' ? round2(gPaid - partG) : round2(tPaid - partT);  
-  
-      // --- SALDO DEVEDOR (AGORA RESPEITA O FILTRO scope) ---  
-      const saldoDevedorThais = useMemo(() => {  
-        let pG = 0;    // parte justa do Guilherme dentro do escopo atual  
-        let paidG = 0; // quanto Guilherme realmente pagou dentro do escopo atual  
-  
-        for (const e of expensesForScope) {  
-          const val = Number(e.amount || 0);  
-  
-          // 🌎 PARTE JUSTA DO GUILHERME (em qualquer tipo)  
-          if (e.split === 'Dividido') {  
-            pG += val / 2;  
-          } else if (e.split === 'Guilherme') {  
-            pG += val;  
-          } // se split = Thais, parte do Gui é 0  
-  
-          // 💸 QUANTO O GUILHERME PAGOU MESMO  
-          if (e.type === "Cartão") {  
-            // Você paga 100% de todas as faturas (todos os cartões)  
-            paidG += val;  
-          } else {  
-            // Pix / Boleto / Ajuste  
-            if (e.paidBy === "Guilherme") {  
-              paidG += val;  
-            }  
-          }  
-        }  
-  
-        // Se paidG > pG, Guilherme pagou mais do que devia -> Thais deve  
-        // Se paidG < pG, Thais pagou mais (ou Ajustes compensaram) -> saldo diminui  
-        return round2(paidG - pG);  
-      }, [expensesForScope]);  
-  
-      const cardTotals = useMemo(() => {  
-        let tot=0, g=0, t=0, d=0;  
-        for (const e of expenses) {  
-            if (e.type !== 'Cartão') continue;  
-            const val = Number(e.amount||0);  
-            tot+=val;  
-            const o = ownerFromPaymentSource(e.paymentSource);  
-            if (o === 'Guilherme') g+=val;  
-            else if (o === 'Thais') t+=val;  
-            else if (o === 'Ambos') d+=val;  
-        }  
-        return { grandTotal: round2(tot), gCard: round2(g), tCard: round2(t), dCard: round2(d) };  
-      }, [expenses]);  
-  
-      // Valor que "some" da fatura no mês seguinte (parcelas que terminam neste mês)  
-      const freedNextInvoice = useMemo(() => {  
-        let total = 0;  
-        let totalG = 0;  
-        let totalT = 0;  
-        let count = 0;  
-        const seen = new Set();  
-  
-        for (const e of expenses) {  
-          const totalI = Number(e.installmentTotal || 0);  
-          const currentI = Number(e.installmentCurrent || 0);  
-  
-          // Só considera lançamentos que são parcelas e estão na ÚLTIMA  
-          if (!totalI || !currentI) continue;  
-          if (totalI <= 1) continue;  
-          if (currentI !== totalI) continue; // apenas última  
-  
-          const key =  
-            e.installmentPlanId ||  
-            `${norm(e.description)}|${norm(e.paymentSource)}|${totalI}`;  
-  
-          if (seen.has(key)) continue;  
-          seen.add(key);  
-  
-          const val = Number(e.amount || 0);  
-          total += val;  
-          count++;  
-  
-          // Que parte é do Gui e da Thais  
-          if (e.type === "Cartão") {  
-            const owner = ownerFromPaymentSource(e.paymentSource);  
-            if (owner === "Guilherme") {  
-              totalG += val;  
-            } else if (owner === "Thais") {  
-              totalT += val;  
-            } else if (owner === "Ambos") {  
-              totalG += val / 2;  
-              totalT += val / 2;  
-            }  
-          } else {  
-            // Parcelados em Pix/Boleto (se algum dia aparecer)  
-            if (e.paidBy === "Guilherme") totalG += val;  
-            else if (e.paidBy === "Thais") totalT += val;  
-          }  
-        }  
-  
-        return {  
-          total: round2(total),  
-          count,  
-          totalG: round2(totalG),  
-          totalT: round2(totalT),  
-        };  
-      }, [expenses]);  
-  
-      // --- HELPER DE ESTILO DE PARCELA ---  
-      const isLastInstallment = (e) => {  
-        const total = Number(e.installmentTotal || 0);  
-        const current = Number(e.installmentCurrent || 0);  
-  
-        if (total > 1 && current === total) return true;  
-  
-        // fallback: se vier só como string "3/3"  
-        if (typeof e.parcela === "string") {  
-          const m = e.parcela.match(/^(\d+)\s*\/\s*(\d+)$/);  
-          if (m) {  
-            const c = Number(m[1]);  
-            const t = Number(m[2]);  
-            return t > 1 && c === t;  
-          }  
-        }  
-        return false;  
-      };  
-  
-      /* ==== Ações ==== */  
-  
-      // --- NOVA FUNÇÃO DE FECHAR O MODAL E LIMPAR ESTADO ---  
-      const closeAddModal = () => {  
-          setIsAddOpen(false);  
-          setEditingId(null);  
-          setFDesc('');  
-          setFValor('');  
-          setFParcela('');  
-      };  
-  
-      // --- salvarLancamento (COM SUPORTE A panelUser) ---  
-      const salvarLancamento = async () => {  
-        const val = parseMoney(fValor);  
-  
-        // Validação básica  
-        if (!fDesc || !Number.isFinite(val)) {  
-            console.warn('Dados inválidos ao salvar lançamento');  
-            return;  
-        }  
-  
-        const mk = monthKeyFromPtDate(fData) || currentMonth;  
-        setSalvando(true);  
-  
-        const expCol = collection(db, 'expenses');  
-          
-        // 🔹 Definir de quem é esse lançamento (painel)  
-        let panelUser = user; // padrão: quem está logado  
-  
-        if (fTipo === 'Cartão') {  
-            const s = norm(fFonte);  
-            if (s.includes('1009')) {  
-                panelUser = 'Thais';  
-            } else if (s.includes('2581') || s.includes('7292')) {  
-                panelUser = 'Guilherme'; // cartão Guilherme + digital ficam no painel do Gui  
-            }  
-        } else {  
-            // Pix / Boleto / Ajuste: fica no painel de quem está usando  
-            if (user === 'Guilherme' || user === 'Thais') {  
-                panelUser = user;  
-            }  
-        }  
-          
-        // Detecta se é parcela digitada no campo  
-        const instObj = parseInstallmentFromCell(fParcela);  
-  
-        const payload = {  
-            description: fDesc,  
-            amount: val,  
-            date: fData,  
-            split: fTipo === 'Ajuste' ? 'Guilherme' : fSplit,  
-            type: fTipo,  
-            paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,  
-            paidBy: fTipo === 'Cartão' ? 'Cartão' : (fTipo === 'Ajuste' ? 'Thais' : user),  
-            monthKey: mk,  
-            parcela: instObj.isInstallment ? instObj.info : null,  
-            isInstallment: instObj.isInstallment,  
-            installmentCurrent: instObj.current,  
-            installmentTotal: instObj.total,  
-            panelUser, // 🔹 novo campo  
-        };  
-  
-        // Remove campos undefined  
-        Object.keys(payload).forEach((k) => {  
-            if (payload[k] === undefined) delete payload[k];  
-        });  
-  
-        try {  
-            if (editingId) {  
-                // ⚠️ NÃO alterar o mês da fatura ao editar  
-                delete payload.monthKey;  
-  
-                // ⚠️ Usa ref direta com db/collection/id para evitar qualquer zica  
-                const ref = doc(db, 'expenses', editingId);  
-                await updateDoc(ref, payload);  
-            } else {  
-                await addDoc(expCol, payload);  
-            }  
-  
-            // Limpa e fecha modal  
-            closeAddModal();  
-        } catch (e) {  
-            console.error('Erro ao salvar lançamento:', e);  
-        }  
-  
-        setSalvando(false);  
-      };  
-  
-      // --- NOVA FUNÇÃO DE ABRIR MODAL PARA EDIÇÃO ---  
-      const openEditModal = (e) => {  
-          setEditingId(e.id);  
-          setFDesc(e.description || '');  
-          const valNum = Number(e.amount || 0);  
-          setFValor(valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));  
-          setFData(e.date || new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));  
-          setFTipo(e.type || 'Cartão');  
-          setFSplit(e.split || 'Dividido');  
-          setFFonte(e.paymentSource || (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'));  
-          setFParcela(e.parcela || '');  
-          setIsAddOpen(true);  
-      };  
-  
-      const makeDedupeKey = (e) =>   
-        `${norm(e.description)}|${e.amount}|${e.date}|${e.parcela||''}|${norm(e.type)}|${norm(e.paymentSource)}|${e.monthKey}`;  
-  
-      const handleFileChange = async (e) => {  
-        const file = e.target.files?.[0];  
-        if (!file) return;  
-        setIsImporting(true);  
-        try {  
-            const rows = await readSpreadsheetFile(file);  
-            if (!rows.length) throw new Error("Vazio");  
-              
-            // --- SMART IMPORT (V5 - Detecção Prioritária Coluna F) ---  
-            const normH = (h) => norm(h || '');  
-            const isHeaderRow = (r=[]) => {  
-                const s = r.map(x => norm(x));  
-                const hasData = s.some(c => /\bdata\b/.test(c));  
-                const hasDesc = s.some(c => /(descri|estab|hist|favorecido|detalhe|loja|comprovante)/.test(c));  
-                const hasValor = s.some(c => /(valor|d[eé]bito|cr[eé]dito|amount|total)/.test(c));  
-                return (hasData && hasValor) || (hasData && hasDesc);  
-            };  
-            let headerIdx = rows.findIndex(isHeaderRow);  
-            if (headerIdx < 0) headerIdx = 0;  
-              
-            const header = rows[headerIdx] || [];  
-            const body = rows.slice(headerIdx + 1);  
-            const cols = detectColumns(header);   
-  
-            const mapped = [];  
-            for (const row of body) {  
-                const rawDate = cols.idxData >= 0 ? row[cols.idxData] : null;  
-                let dateStr = null;  
-                if (rawDate) dateStr = excelSerialToPT(rawDate);  
-                if (!dateStr) {  
-                   for (const c of row) {  
-                       const s = String(c).trim();  
-                       if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) { dateStr=s; break; }  
-                   }  
-                }  
-                if (!dateStr) continue;  
-                  
-                // Keep "real" month key just in case, but import into CURRENTLY VIEWED month  
-                const mk = monthKeyFromPtDate(dateStr);  
-  
-                const desc = getDescriptionFromRow(row, cols);  
-                if (shouldIgnorePaymentInclusion(row, desc)) continue;  
-  
-                let amount = NaN;  
-                if (cols.idxValorBRL >= 0) amount = parseMoney(row[cols.idxValorBRL]);  
-                if (!Number.isFinite(amount) && cols.idxValorGen >= 0) amount = parseMoney(row[cols.idxValorGen]);  
-                if (!Number.isFinite(amount)) {  
-                    for (let i = row.length - 1; i >= 0; i--) {  
-                        const n = parseMoney(row[i]);  
-                        if (Number.isFinite(n) && Math.abs(n) > 0) { amount = n; break; }  
-                    }  
-                }  
-                if (!Number.isFinite(amount)) continue;  
-  
-                // --- PARCELA: detecta usando a linha inteira, dando prioridade à coluna de parcelas ---  
-                const parcelaInfo = detectInstallmentForRow(row, cols);  
-                  
-                const last4 = last4FromRow(row);  
-                let source = 'Cartão';  
-                if (last4 === "2581") source = "Cartão Guilherme (final 2581)";  
-                else if (last4 === "1009") source = "Cartão Thais (final 1009)";  
-                else if (last4 === "7292") source = "Cartão Digital (final 7292)";  
-  
-                // 🔹 De quem é esse lançamento no painel?  
-                let panelUser = 'Guilherme'; // padrão  
-                const sSrc = norm(source);  
-                if (sSrc.includes('1009')) {  
-                    panelUser = 'Thais';  
-                } else if (sSrc.includes('2581') || sSrc.includes('7292')) {  
-                    panelUser = 'Guilherme';  
-                }  
-  
-                mapped.push({  
-                    description: desc,   
-                    amount: round2(Math.abs(amount)),  
-                    date: dateStr,   
-                    type: 'Cartão',   
-                    paymentSource: source,   
-                    split: 'Dividido',   
-                    paidBy: 'Cartão',  
-                    
-                    // --- FORÇA O MÊS ATUAL NA IMPORTAÇÃO ---  
-                    monthKey: currentMonth,  
-                    originalMonthKey: mk,  
-                      
-                    parcela: parcelaInfo.isInstallment ? parcelaInfo.info : null,  
-                    isInstallment: parcelaInfo.isInstallment,  
-                    installmentTotal: parcelaInfo.total,  
-                    installmentCurrent: parcelaInfo.current,  
-                    installmentPlanId: parcelaInfo.isInstallment  
-                      ? `${norm(desc)}|${last4 || 'nocard'}|${parcelaInfo.total}`  
-                      : null,  
-                    panelUser, // 🔹 aqui  
-                });  
-            }  
-              
-            setImportedExpenses(mapped);  
-            setIsImportOpen(true);  
-        } catch(err) { console.error(err); }  
-        setIsImporting(false);  
-        if (fileInputRef.current) fileInputRef.current.value = '';  
-      };  
-  
-      const confirmImport = async () => {  
-        if (!importedExpenses.length) return;  
-          
-        setIsImporting(true);  
-          
-        // Pre-load existing data to dedupe  
-        const monthsInFile = [...new Set(importedExpenses.map(e => e.monthKey))];  
-        const expRef = collection(db, 'expenses');  
-        const existingKeys = new Set();  
-          
-        await Promise.all(monthsInFile.map(async (mk) => {  
-            const q = query(expRef, where('monthKey', '==', mk));  
-            const snap = await window.FirebaseLib.getDocs(q);  
-            snap.forEach(doc => {  
-                const e = doc.data();  
-                existingKeys.add(makeDedupeKey(e));  
-            });  
-        }));  
-  
-        const batch = writeBatch(db);  
-        let count = 0;  
-        importedExpenses.forEach(imp => {  
-            const key = makeDedupeKey(imp);  
-            if (!existingKeys.has(key)) {   
-                const { installmentPlanId, ...toSave } = imp;  
-                if (imp.installmentPlanId) toSave.installmentPlanId = imp.installmentPlanId;  
-                  
-                // Remove undefined fields  
-                Object.keys(toSave).forEach(key => toSave[key] === undefined && delete toSave[key]);  
-  
-                batch.set(doc(expRef), toSave);   
-                count++;   
-            }  
-        });  
-        if (count > 0) await batch.commit();  
-        setIsImportOpen(false);  
-        setImportedExpenses([]);  
-        setIsImporting(false);  
-      };  
-  
-      const doDelete = async () => {  
-        if (!delTarget) return;  
-        setDeleting(true);  
-        const expRef = doc(db, 'expenses', delTarget.id);  
-        try {  
-             if (delTarget.installmentPlanId && delTarget.parcela) {  
-                 const planRef = doc(db, 'installmentPlans', delTarget.installmentPlanId);  
-                 await runTransaction(db, async (t) => {  
-                     const planSnap = await t.get(planRef);  
-                     if (planSnap.exists()) {  
-                         const data = planSnap.data();  
-                         const deleted = data.deletedParcels || [];  
-                         t.update(planRef, { deletedParcels: [...deleted, delTarget.parcela] });  
-                     }  
-                     t.delete(expRef);  
-                 });  
-             } else { await deleteDoc(expRef); }  
-             setDelTarget(null);  
-             setDelOpen(false);  
-        } catch(e) { console.error(e); }  
-        setDeleting(false);  
-      };  
-  
-      // --- LIMPAR APENAS MÊS ATUAL (COM SUPORTE A panelUser) ---  
-      const clearCurrentMonth = async () => {  
-        try {  
-            const expRef = collection(db, 'expenses');  
-            const q = query(  
-                expRef,   
-                where('monthKey','==', currentMonth),  
-                where('panelUser', '==', user) // 🔹 só do painel atual  
-            );  
-            const snap = await window.FirebaseLib.getDocs(q);  
-            const batch = writeBatch(db);  
-            snap.forEach(d => batch.delete(d.ref));  
-            await batch.commit();  
-            setIsClearOpen(false);  
-        } catch(e) { console.error(e); }  
-      };  
-  
-      const clearAll = async () => {  
-         try {  
-             const q = query(collection(db, 'expenses'));  
-             const snap = await window.FirebaseLib.getDocs(q);  
-             const batch = writeBatch(db);  
-             snap.forEach(d => batch.delete(d.ref));  
-             await batch.commit();  
-             setIsClearOpen(false);  
-         } catch(e) { console.error(e); }  
-      };  
-  
-      // Abas visíveis conforme o usuário  
-      const tabsForUser =  
-        user === 'Thais'  
-          ? ['Todos', 'Cartão', 'Pix', 'Boleto', 'Ajuste', 'Parcelado']  
-          : ['Todos', 'Cartão', 'Pix', 'Boleto', 'Parcelado'];  
-  
-      /* ==== UI ==== */  
-      return (  
-        <div className="min-h-screen flex flex-col pb-12 bg-slate-50 dark:bg-slate-900">  
-            <header className="bg-white dark:bg-slate-800 shadow-sm px-4 py-3 flex justify-between items-center sticky top-0 z-10">  
-                <div className="flex items-center gap-2">  
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold ${theme.bg}`}>{user[0]}</div>  
-                    <div><h1 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">Meu Acerto</h1><p className="text-xs text-slate-500 dark:text-slate-400">Mês: {monthLabel(currentMonth)}</p></div>  
-                </div>  
-                <div className="flex items-center gap-2">  
-                   <div className="hidden sm:flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">  
-                       {['geral','cartao','pixboleto'].map(s => (  
-                           <button key={s} onClick={()=>setScope(s)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${scope===s ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400'}`}>{s==='geral'?'Geral':s==='cartao'?'Cartão':'Pix'}</button>  
-                       ))}  
-                   </div>  
-                   <button onClick={onLogout} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300">  
-                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>  
-                   </button>  
-                </div>  
-            </header>  
-  
-            <main className="max-w-5xl mx-auto w-full p-4 space-y-4">  
-                <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 rounded-xl shadow-sm">  
-                    <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, -1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300">◀</button>  
-                    <div className="flex items-center gap-2">  
-                        <select value={currentMonth} onChange={e=>setCurrentMonth(e.target.value)} className="bg-transparent font-semibold text-center outline-none cursor-pointer text-slate-900 dark:text-slate-100">  
-                            {availableMonths.map(m => <option key={m} value={m} className="dark:bg-slate-800">{monthLabel(m)}</option>)}  
-                        </select>  
-                    </div>  
-                    <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, 1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300">▶</button>  
-                </div>  
-  
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">  
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">  
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Divisão ({scope})</p>  
-                        <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partG)}</span></div>  
-                        <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partT)}</span></div>  
-                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500 dark:text-slate-400"><span>Diferença</span><span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(difGastos)}</span></div>  
-                    </div>  
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">  
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Pagamentos ({scope})</p>  
-                        <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(gPaid)}</span></div>  
-                        <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(tPaid)}</span></div>  
-                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">Se {user} quitar tudo: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(valorDevolverSePagarTudo)}</span></div>  
-                    </div>  
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm relative overflow-hidden">  
-                        <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-bl-full -mr-4 -mt-4"></div>  
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                          Saldo ({scope === 'geral' ? 'Geral' : scope === 'cartao' ? 'Cartão' : 'Pix / Boleto'}) (Thais → Gui)
-                        </p>  
-                        <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{formatBRL(saldoDevedorThais)}</p>  
-                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Total faturas: {formatBRL(cardTotals.grandTotal)}</p>  
-                    </div>  
-                </div>  
-  
-                {/* NOVO CARD – Resumo das Faturas de Cartão */}  
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">  
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">  
-                    Faturas de cartão ({monthLabel(currentMonth)})  
-                    </p>  
-  
-                    <div className="flex justify-between items-end mb-2">  
-                    <span className="text-sm text-slate-700 dark:text-slate-200">  
-                        Total geral (todos os cartões)  
-                    </span>  
-                    <span className="font-bold text-slate-900 dark:text-slate-100">  
-                        {formatBRL(cardTotals.grandTotal)}  
-                    </span>  
-                    </div>  
-  
-                    <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1 text-xs">  
-                    <div className="flex justify-between">  
-                        <span className="text-slate-600 dark:text-slate-300">  
-                        Cartão Thais (final 1009)  
-                        </span>  
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">  
-                        {formatBRL(cardTotals.tCard)}  
-                        </span>  
-                    </div>  
-  
-                    <div className="flex justify-between">  
-                        <span className="text-slate-600 dark:text-slate-300">  
-                        Cartão Guilherme (final 2581)  
-                        </span>  
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">  
-                        {formatBRL(cardTotals.gCard)}  
-                        </span>  
-                    </div>  
-  
-                    <div className="flex justify-between">  
-                        <span className="text-slate-600 dark:text-slate-300">  
-                        Cartão Digital (final 7292)  
-                        </span>  
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">  
-                        {formatBRL(cardTotals.dCard)}  
-                        </span>  
-                    </div>  
-                    </div>  
-                </div>  
-  
-                {freedNextInvoice.count > 0 && (  
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-3">  
-                    <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-100 mb-1">  
-                      Alívio na próxima fatura  
-                    </p>  
-  
-                    <div className="flex items-end justify-between">  
-                      <span className="text-sm text-emerald-900 dark:text-emerald-100">  
-                        Valor que deixa de ser cobrado  
-                      </span>  
-                      <span className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">  
-                        {formatBRL(freedNextInvoice.total)}  
-                      </span>  
-                    </div>  
-  
-                    <p className="text-[11px] text-emerald-800 dark:text-emerald-200 mt-1">  
-                      {freedNextInvoice.count === 1  
-                        ? "1 parcela termina neste mês."  
-                        : `${freedNextInvoice.count} parcelas terminam neste mês.`}  
-                    </p>  
-  
-                    <p className="text-[11px] text-emerald-800 dark:text-emerald-200">  
-                      Sua parte:{" "}  
-                      <span className="font-semibold">  
-                        {formatBRL(  
-                          user === "Guilherme"  
-                            ? freedNextInvoice.totalG  
-                            : freedNextInvoice.totalT  
-                        )}  
-                      </span>  
-                    </p>  
-                  </div>  
-                )}  
-  
-                <div className="flex gap-2 overflow-x-auto pb-2">  
-                    <button onClick={()=>{  
-                        setEditingId(null);  
-                        setFDesc('');  
-                        setFValor('');  
-                        setFParcela('');  
-                        setFTipo('Cartão');  
-                        setFSplit('Dividido');  
-                        setFFonte(  
-                            user === 'Guilherme'  
-                            ? 'Cartão Guilherme (final 2581)'  
-                            : 'Cartão Thais (final 1009)'  
-                        );  
-                        setFData(new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));  
-                        setIsAddOpen(true);  
-                    }} className={`flex-shrink-0 px-4 py-2 rounded-xl text-white font-semibold shadow ${theme.bg} ${theme.hover}`}>+ Novo</button>  
-                    <button onClick={()=>fileInputRef.current?.click()} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Importar</button>  
-                    <input ref={fileInputRef} type="file" hidden onChange={handleFileChange} />  
-                    <button onClick={()=>setIsClearOpen(true)} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-red-500 hover:bg-red-50 dark:hover:bg-slate-700">Limpar</button>  
-                </div>  
-  
-                <div className="rounded-2xl overflow-hidden">  
-                    <div className="flex gap-2 p-1 mb-2 overflow-x-auto">  
-                         {tabsForUser.map(f => (  
-                             <button  
-                               key={f}  
-                               onClick={() => setFilterType(f)}  
-                               className={`px-3 py-1 rounded-full text-xs transition ${  
-                                 filterType === f  
-                                   ? theme.bg + ' text-white'  
-                                   : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'  
-                               }`}  
-                             >  
-                               {f}  
-                             </button>  
-                         ))}  
-                    </div>  
-                      
-                    <div className="flex flex-col space-y-2">  
-                        {filteredList.length === 0 && <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm bg-white dark:bg-slate-800 rounded-2xl">Nenhum lançamento neste mês.</div>}  
-                        {filteredList.map(e => (  
-                          <div  
-                            key={e.id}  
-                            className={`relative p-4 pl-5 flex items-center justify-between bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-md transition-all ${stripeBySplit(e)}`}  
-                          >  
-                            <div className="flex-1 min-w-0 pr-2">  
-                              <div className="flex items-baseline gap-2">  
-                                <span className="font-semibold text-sm truncate text-slate-900 dark:text-slate-100">  
-                                  {e.description}  
-                                </span>  
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">  
-                                  {e.type}  
-                                </span>  
-                                {e.parcela && (  
-                                  <span  
-                                    className={  
-                                      "text-[10px] px-1.5 py-0.5 rounded font-medium " +  
-                                      (isLastInstallment(e)  
-                                        ? "bg-emerald-50 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300"  
-                                        : "bg-indigo-50 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300")  
-                                    }  
-                                  >  
-                                    {e.parcela}  
-                                  </span>  
-                                )}  
-                              </div>  
-                              <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">  
-                                {e.date} • {e.paymentSource}  
-                              </div>  
-                            </div>  
-  
-                            <div className="flex flex-col items-end gap-1">  
-                              <div  
-                                className={`font-bold text-sm ${  
-                                  e.amount < 0  
-                                    ? 'text-emerald-500 dark:text-emerald-400'  
-                                    : 'text-slate-900 dark:text-slate-100'  
-                                }`}  
-                              >  
-                                {formatBRL(e.amount)}  
-                              </div>  
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500">  
-                                {e.split}  
-                              </div>  
-  
-                              {/* Botões de ação */}  
-                              <div className="flex gap-1 mt-1">  
-                                <button  
-                                  type="button"  
-                                  onClick={() => openEditModal(e)}  
-                                  className="px-2 py-1 rounded-lg text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"  
-                                >  
-                                  ✏️ Editar  
-                                </button>  
-                                <button  
-                                  type="button"  
-                                  onClick={() => { setDelTarget(e); setDelOpen(true); }}  
-                                  className="px-2 py-1 rounded-lg text-[10px] bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"  
-                                >  
-                                  🗑️ Excluir  
-                                </button>  
-                              </div>  
-                            </div>  
-                          </div>  
-                        ))}  
-                    </div>  
-                </div>  
-            </main>  
-  
-            {/* Modal Novo Lançamento */}  
-            <Modal isOpen={isAddOpen} onClose={closeAddModal}>  
-                <h3 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{editingId ? 'Editar Lançamento' : 'Novo Lançamento'}</h3>  
-                <label className={ui.label}>Descrição</label>  
-                <input className={ui.input} placeholder="Ex: Mercado, Uber..." value={fDesc} onChange={e=>setFDesc(e.target.value)} />  
-                <div className="grid grid-cols-2 gap-3 mt-3">  
-                    <div>  
-                        <label className={ui.label}>Valor</label>  
-                        <input ref={valorRef} className={ui.input} placeholder="0,00" value={fValor} onChange={handleValorChange} />  
-                    </div>  
-                    <div>  
-                        <label className={ui.label}>Data</label>  
-                        <input className={ui.input} placeholder="dd/mm/aaaa" value={fData} onChange={e=>setFData(e.target.value)} />  
-                    </div>  
-                </div>  
-                <div className="grid grid-cols-2 gap-3 mt-3">  
-                    <div>  
-                        <label className={ui.label}>Tipo</label>  
-                        <select className={ui.select} value={fTipo} onChange={e=>setFTipo(e.target.value)}>  
-                            <option>Cartão</option><option>Pix</option><option>Boleto</option><option disabled={user!=='Thais'}>Ajuste</option>  
-                        </select>  
-                    </div>  
-                    <div>  
-                        <label className={ui.label}>Divisão</label>  
-                        <select className={ui.select} value={fSplit} onChange={e=>setFSplit(e.target.value)} disabled={fTipo==='Ajuste'}>  
-                            <option>Dividido</option><option>Guilherme</option><option>Thais</option>  
-                        </select>  
-                    </div>  
-                </div>  
-                <div className="mt-3">  
-                    <label className={ui.label}>Cartão / Origem</label>  
-                    {fTipo==='Cartão' ? (  
-                        <select className={ui.select} value={fFonte} onChange={e=>setFFonte(e.target.value)}>  
-                            <option>Cartão Guilherme (final 2581)</option>  
-                            <option>Cartão Thais (final 1009)</option>  
-                            <option>Cartão Digital (final 7292)</option>  
-                        </select>  
-                    ) : (  
-                        <input className={ui.input} value={fTipo} disabled />  
-                    )}  
-                </div>  
-                {fTipo==='Cartão' && (  
-                    <div className="mt-3">  
-                        <label className={ui.label}>Parcela</label>  
-                        <input className={ui.input} placeholder="Parcela (ex: 1/10)" value={fParcela} onChange={e=>setFParcela(e.target.value)} />  
-                    </div>  
-                )}  
-                <div className="mt-6 flex items-center justify-end gap-3">  
-                    <button className={ui.btnGhost} onClick={closeAddModal}>Cancelar</button>  
-                    <button className={ui.btnPrimary} onClick={salvarLancamento} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>  
-                </div>  
-            </Modal>  
-              
-            {/* Outros Modais (Import, Delete, Clear) mantidos com estilo dark mode */}  
-            <Modal isOpen={isImportOpen} onClose={()=>setIsImportOpen(false)}>  
-                <h3 className="font-bold mb-2 text-slate-900 dark:text-slate-100">Confirmar Importação</h3>  
-                <p className="text-sm mb-4 text-slate-600 dark:text-slate-400">Encontrados {importedExpenses.length} itens novos.</p>  
-                <div className="max-h-40 overflow-y-auto bg-slate-50 dark:bg-slate-800 p-2 text-xs mb-4 space-y-1 rounded border dark:border-slate-700">  
-                    {importedExpenses.map((e,i)=><div key={i} className="flex justify-between text-slate-700 dark:text-slate-300"><span>{e.description}</span><span>{formatBRL(e.amount)}</span></div>)}  
-                </div>  
-                <button onClick={confirmImport} className={ui.btnPrimary + " w-full"}>Importar {importedExpenses.length} itens</button>  
-            </Modal>  
-  
-            <Modal isOpen={isDelOpen} onClose={()=>setDelOpen(false)}>  
-                <div className="p-2 text-center">  
-                    <h3 className="font-bold text-red-500 mb-2">Excluir Lançamento?</h3>  
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{delTarget?.description} ({formatBRL(delTarget?.amount)})</p>  
-                    <div className="flex justify-center gap-2">  
-                        <button onClick={()=>setDelOpen(false)} className={ui.btnGhost}>Cancelar</button>  
-                        <button onClick={doDelete} className="rounded-xl px-4 py-2 bg-red-500 text-white font-semibold hover:bg-red-600">Excluir</button>  
-                    </div>  
-                </div>  
-            </Modal>  
-              
-            <Modal isOpen={isClearOpen} onClose={()=>setIsClearOpen(false)}>  
-                 <div className="p-2 space-y-3">  
-                    <h3 className="font-bold text-lg mb-2 text-slate-900 dark:text-slate-100">Limpar Dados</h3>  
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Escolha o que deseja apagar:</p>  
-                    <button onClick={clearCurrentMonth} className="w-full py-3 rounded-xl bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200 font-semibold hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors">Limpar Apenas {monthLabel(currentMonth)}</button>  
-                    <div className="border-t border-slate-100 dark:border-slate-700 my-2"></div>  
-                    <button onClick={clearAll} className="w-full py-3 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-semibold hover:bg-red-100 dark:hover:bg-red-900/50 text-xs transition-colors">⚠️ Apagar TUDO (Reset Geral)</button>  
-                    <button onClick={()=>setIsClearOpen(false)} className="w-full py-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs mt-2">Cancelar</button>  
-                 </div>  
-            </Modal>  
-        </div>  
-      );  
-    };  
-  
-    // ================== APP (Bootstrap Firebase + escolha de usuário) ==================  
-    const App = () => {  
-      const [db, setDb] = useState(null);  
-      const [authReady, setAuthReady] = useState(false);  
-      const [panelUser, setPanelUser] = useState(() => {  
-        try {  
-          return localStorage.getItem('panelUser') || null;  
-        } catch {  
-          return null;  
-        }  
-      });  
-  
-      useEffect(() => {  
-        const fb = window.FirebaseLib;  
-        if (!fb) return;  
-  
-        // Evita inicializar o Firebase duas vezes  
-        if (!window._meuAcertoApp) {  
-          const firebaseConfig = {  
-            apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",  
-            authDomain: "meu-acerto-app.firebaseapp.com",  
-            projectId: "meu-acerto-app",  
-            storageBucket: "meu-acerto-app.appspot.com",  
-            messagingSenderId: "326844075367",  
-            appId: "1:326844075367:web:0315e86713b1e0071f33c2"  
-          };  
-  
-          const app = fb.initializeApp(firebaseConfig);  
-          window._meuAcertoApp = app;  
-  
-          const dbInstance = fb.getFirestore(app);  
-          setDb(dbInstance);  
-  
-          // Persistência offline (se der erro, só ignora)  
-          fb.enableIndexedDbPersistence(dbInstance).catch(() => {});  
-  
-          const auth = fb.getAuth(app);  
-          fb.onAuthStateChanged(auth, (user) => {  
-            if (user) {  
-              setAuthReady(true);  
-            } else {  
-              fb.signInAnonymously(auth).catch(console.error);  
-            }  
-          });  
-  
-          // Garante um login anônimo inicial  
-          fb.signInAnonymously(auth).catch(() => {});  
-        } else {  
-          const app = window._meuAcertoApp;  
-          const dbInstance = window.FirebaseLib.getFirestore(app);  
-          setDb(dbInstance);  
-          setAuthReady(true);  
-        }  
-      }, []);  
-  
-      const handleSelectUser = (u) => {  
-        setPanelUser(u);  
-        try {  
-          localStorage.setItem('panelUser', u);  
-        } catch {}  
-      };  
-  
-      const handleLogout = () => {  
-        setPanelUser(null);  
-        try {  
-          localStorage.removeItem('panelUser');  
-        } catch {}  
-      };  
-  
-      // Tela de carregamento enquanto Firebase/Auth não estão prontos  
-      if (!authReady || !db) {  
-        return (  
-          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">  
-            <div className="w-10 h-10 border-4 border-slate-300 border-t-indigo-500 rounded-full animate-spin mb-4" />  
-            <p className="text-sm text-slate-600 dark:text-slate-300">  
-              Carregando Meu Acerto...  
-            </p>  
-          </div>  
-        );  
-      }  
-  
-      // Se ainda não escolheu Guilherme / Thais  
-      if (!panelUser) {  
-        return <UserSelectionScreen onSelectUser={handleSelectUser} />;  
-      }  
-  
-      // App principal  
-      return (  
-        <Dashboard  
-          user={panelUser}  
-          onLogout={handleLogout}  
-          db={db}  
-        />  
-      );  
-    };  
-  
-    const root = createRoot(document.getElementById('root'));  
-    root.render(<App />);  
-      
-    if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {  
-        navigator.serviceWorker.register('sw.js').catch(() => {});  
-    }  
-  </script>  </body>  
+<!DOCTYPE html>
+<html lang="pt-PT">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meu Acerto</title>
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Meu Acerto" />
+    <link rel="apple-touch-icon" href="https://placehold.co/180x180/4338ca/ffffff?text=Acerto" />
+    <!-- Theme Colors -->
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+    <!-- UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: 'media' }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- React -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+    <!-- SheetJS -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Firebase Modular SDK -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+      import { 
+        getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
+        onSnapshot, runTransaction, writeBatch, query, where, getDocs, 
+        enableIndexedDbPersistence, orderBy, limit, startAfter, documentId 
+      } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
+      import { 
+        getAuth, signInAnonymously, onAuthStateChanged 
+      } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+
+      window.FirebaseLib = {
+        initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
+        onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,
+        orderBy, limit, startAfter, documentId,
+        getAuth, signInAnonymously, onAuthStateChanged
+      };
+    </script>
+    <style>
+      body { font-family: 'Inter', sans-serif; }
+      .modal-enter { animation: fadeIn .2s ease-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: scale(.98);} to { opacity: 1; transform: scale(1);} }
+    </style>
+  </head>
+  <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300">
+    <div id="root"></div>
+    <script type="text/babel" data-presets="env,react">
+      const { useState, useEffect, useMemo, useRef } = React;
+      const { createRoot } = ReactDOM;
+
+      /* ========= Styles Object ========= */
+      const ui = {
+        modal: "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl p-6 max-w-md w-full m-4",
+        label: "block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1",
+        input: "w-full rounded-xl border px-4 py-3 text-sm bg-white text-slate-900 placeholder-slate-400 " +
+               "border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +
+               "dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:border-slate-700",
+        select: "w-full rounded-xl border px-4 py-3 text-sm bg-white text-slate-900 " +
+                "border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +
+                "dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700",
+        btnPrimary: "rounded-xl px-5 py-3 bg-pink-600 hover:bg-pink-700 text-white font-semibold shadow-md hover:shadow-lg transition-all " +
+                    "dark:bg-pink-600 dark:hover:bg-pink-500",
+        btnGhost: "rounded-xl px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 " +
+                  "dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"
+      };
+
+      /* ========= Helpers ========= */
+      const norm = (s) => 
+        String(s || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim()
+          .toLowerCase();
+
+      const canonicalSplit = (s) => {
+        const n = norm(s);
+        if (n.includes('guilherme')) return 'Guilherme';
+        if (n.includes('thais')) return 'Thais';
+        return 'Dividido';
+      };
+
+      const uiOwner = (e) => {
+        const s = norm(e.split);
+        if (s === "guilherme" || s === "thais") return s;
+        const who = norm(e.paidBy || e.owner || e.user || e.person || e.responsavel);
+        if (who === "guilherme" || who === "thais") return who;
+        return "dividido";
+      };
+
+      const stripeBySplit = (e) => {
+        const owner = uiOwner(e);
+        const base = "before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-1.5 before:rounded-full";
+        if (owner === "guilherme") return base + " before:bg-indigo-500";
+        if (owner === "thais")      return base + " before:bg-pink-500";
+        return "";
+      };
+
+      const shouldIgnorePaymentInclusion = (row, chosenDesc) => {
+        const normLocal = (s) => String(s || "")
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase().trim();
+        const haystack = [chosenDesc, ...row].map(normLocal).join(" ");
+        return /\binclusao\s+de\s+pagament/.test(haystack);
+      };
+
+      // --- IMPORT HELPER ---
+      async function readSpreadsheetFile(file) {
+        const isXlsx = /\.(xlsx?|xls)$/i.test(file.name);
+        const data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = reject;
+          if (isXlsx) r.readAsArrayBuffer(file); else r.readAsText(file, "utf-8");
+        });
+
+        if (!isXlsx) {
+          const wb = XLSX.read(data, { type: "string" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false, blankrows: false });
+        }
+
+        const wb = XLSX.read(data, { type: "array" });
+        let best = [], bestLen = -1;
+        for (const name of wb.SheetNames) {
+          const ws = wb.Sheets[name];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false, blankrows: false });
+          const filled = rows.filter(r => (r || []).some(c => String(c||'').trim() !== '')).length;
+          if (filled > bestLen) { bestLen = filled; best = rows; }
+        }
+        return best;
+      }
+
+      // --- PARSER DE PARCELA (ATUALIZADO V2) ---
+      function parseInstallmentFromCell(cellValue) {
+        if (cellValue == null || cellValue === '') {
+          return { isInstallment: false };
+        }
+
+        // 1. Se o Excel converteu "1/10" em número (ex.: 0.1)
+        if (typeof cellValue === 'number') {
+          const v = cellValue;
+
+          // Só faz sentido tentar fração se for entre 0 e 1 (evita pegar 1, 2, 3...)
+          if (v > 0 && v < 1) {
+            for (let d = 2; d <= 60; d++) {
+              const n = Math.round(v * d);
+              if (Math.abs(v - n / d) < 0.0001) {
+                if (n >= 1 && n <= d) {
+                  return {
+                    isInstallment: true,
+                    info: `${n}/${d}`,
+                    current: n,
+                    total: d,
+                  };
+                }
+              }
+            }
+          }
+
+          return { isInstallment: false };
+        }
+
+        let raw = String(cellValue).trim();
+        let normalized = raw
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+
+        // valores que significam "não é parcelado"
+        if (
+          normalized === 'unica' ||
+          normalized === 'única' ||
+          normalized === 'a vista' ||
+          normalized === 'avista'
+        ) {
+          return { isInstallment: false };
+        }
+
+        // 2. Padrões tipo "1/10", "02/12", "1 de 10", "1 DE 10"
+        const match =
+          raw.match(/^(\d+)\s*[\/\\]\s*(\d+)$/) ||
+          raw.match(/^(\d+)\s*(?:de|DE|of)\s*(\d+)$/);
+
+        if (match) {
+          const current = parseInt(match[1], 10);
+          const total = parseInt(match[2], 10);
+          if (
+            Number.isFinite(current) &&
+            Number.isFinite(total) &&
+            total > 1 &&
+            current >= 1 &&
+            current <= total
+          ) {
+            return {
+              isInstallment: true,
+              info: `${current}/${total}`,
+              current,
+              total,
+            };
+          }
+        }
+
+        return { isInstallment: false };
+      }
+
+      // --- FALLBACK: Varredura de Linha (Conservador) ---
+      // Aqui NÃO aceitamos data, para não confundir a coluna de Data com parcela
+      const extractParcelaFromText = (text) => {
+        if (!text) return null;
+        let s = String(text).normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+        // Remove datas completas
+        s = s.replace(/\b\d{1,2}\s*[\/\-]\s*\d{1,2}\s*[\/\-]\s*\d{2,4}\b/g, " ");   
+
+        let m = s.match(/\b(\d{1,2})\s*[\/\\]\s*(\d{1,2})\b/);
+        if (m && parseInt(m[1]) <= parseInt(m[2]) && parseInt(m[2]) > 1) return `${parseInt(m[1])}/${parseInt(m[2])}`;
+
+        m = s.match(/\b(\d{1,2})\s*(?:de|of)\s*(\d{1,2})\b/);
+        if (m && parseInt(m[1]) <= parseInt(m[2]) && parseInt(m[2]) > 1) return `${parseInt(m[1])}/${parseInt(m[2])}`;
+
+        return null;
+      };
+
+      const parcelaFromRowFallback = (row) => {
+        for (const c of row) {
+          const p = extractParcelaFromText(c);
+          if (p) return p;
+        }
+        return null;
+      };
+
+      // --- HELPER DE DETECÇÃO DE LINHA INTEIRA (V2 - com heurística de colunas adjacentes) ---
+      function detectInstallmentForRow(row = [], cols = {}) {
+        // 1. Se temos uma coluna claramente de parcela, usar ela primeiro
+        if (typeof cols.idxParcela === 'number' && cols.idxParcela >= 0) {
+          const directInfo = parseInstallmentFromCell(row[cols.idxParcela]);
+          if (directInfo.isInstallment) return directInfo;
+
+          // 1b. Heurística: "Parcela" em uma coluna e "Qtd Parcelas" na coluna logo ao lado
+          const curCell = row[cols.idxParcela];
+          const totalCell = row[cols.idxParcela + 1];
+
+          const toNum = (v) => {
+            if (v == null || v === '') return NaN;
+            if (typeof v === 'number') return v;
+            const s = String(v).replace(/[^\d]/g, '');
+            return s ? Number(s) : NaN;
+          };
+
+          const curNum = toNum(curCell);
+          const totNum = toNum(totalCell);
+
+          if (
+            Number.isFinite(curNum) &&
+            Number.isFinite(totNum) &&
+            totNum > 1 &&
+            curNum >= 1 &&
+            curNum <= totNum
+          ) {
+            return {
+              isInstallment: true,
+              info: `${curNum}/${totNum}`,
+              current: curNum,
+              total: totNum,
+            };
+          }
+        }
+
+        // Índices que não fazem sentido para parcela
+        const skip = new Set(
+          [cols.idxData, cols.idxDescricao, cols.idxValorBRL, cols.idxValorGen, cols.idxTitular]
+            .filter((i) => typeof i === 'number' && i >= 0)
+        );
+
+        // 2. Varre as outras colunas procurando algo que pareça "1/10", "2 de 5" etc.
+        for (let i = 0; i < row.length; i++) {
+          if (skip.has(i)) continue;
+          const info = parseInstallmentFromCell(row[i]);
+          if (info.isInstallment) return info;
+        }
+
+        // 3. Fallback extra com o extrator antigo (mais permissivo)
+        const pText = parcelaFromRowFallback(row);
+        if (pText) {
+          const [cur, tot] = pText.split('/').map(Number);
+          if (Number.isFinite(cur) && Number.isFinite(tot) && tot > 1 && cur >= 1 && cur <= tot) {
+            return {
+              isInstallment: true,
+              info: pText,
+              current: cur,
+              total: tot,
+            };
+          }
+        }
+
+        return { isInstallment: false };
+      }
+
+      const last4FromRow = (row = []) => {
+        for (const cell of row) {
+          const raw = String(cell ?? '');
+          const s = raw.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+          let m = s.match(/\bfinal\s*(\d{4})\b/);
+          if (m) return m[1];
+          m = s.match(/(?:\*{2,}|x{3,}|xxxx)\s*(\d{4})\b/);
+          if (m) return m[1];
+          if (/\b2581\b/.test(s)) return '2581';
+          if (/\b1009\b/.test(s)) return '1009';
+          if (/\b7292\b/.test(s)) return '7292';
+          m = s.match(/\b(?!20\d{2}\b)(\d{4})\b/);
+          if (m) return m[1];
+        }
+        return null;
+      };
+
+      const parseMoney = (input) => {
+        if (input == null) return NaN;
+        if (typeof input === 'number') return input;
+        let s = String(input).replace(/\u00a0/g, ' ').replace(/[^\d.,\-()]/g, '').trim();
+        if (!s) return NaN;
+        let neg = false;
+        if (/^.*$/.test(s)) { neg = true; s = s.slice(1, -1); }
+        else if (/-$/.test(s))  { neg = true; s = s.slice(0, -1); }
+        else if (s.startsWith('-')) { neg = true; s = s.slice(1); }
+        const lastComma = s.lastIndexOf(',');
+        const lastDot   = s.lastIndexOf('.');
+        if (lastComma > lastDot) { s = s.replace(/\./g, '').replace(',', '.'); }   
+        else { s = s.replace(/,/g, ''); }
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? (neg ? -n : n) : NaN;
+      };
+
+      const excelSerialToPT = (v) => {
+        if (typeof v === 'number') {
+          const ms = Math.round((v - 25569) * 86400 * 1000);
+          return new Date(ms).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+        }
+        if (typeof v === 'string') {
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;
+          if (/^\d{4}-\d{2}-\d{2}/.test(v)) return new Date(v).toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+          const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);
+          if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/20${m[3]}`;
+        }
+        return new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+      };
+
+      const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL'}).format(v || 0);
+      const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+
+      const ptDateToDateObj = (pt) => {
+        const m = String(pt || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (!m) return null;
+        return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12);
+      };
+
+      const monthKeyFromPtDate = (pt) => {
+        const m = String(pt || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (!m) return null;
+        return `${m[3]}-${m[2].padStart(2,'0')}`;
+      };
+
+      const monthKeyFromDateObj = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2,'0');
+        return `${yyyy}-${mm}`;
+      };
+
+      const currentMonthKey = () => monthKeyFromDateObj(new Date());
+
+      const monthLabel = (monthKey) => {
+        if (!monthKey) return '';
+        const [yyyy, mm] = monthKey.split('-').map(Number);
+        const d = new Date(yyyy, mm - 1, 1);
+        const nomeMes = d.toLocaleDateString('pt-BR', { month: 'long' });
+        return `${nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1)} ${yyyy}`;
+      };
+
+      const shiftMonthKey = (monthKey, delta) => {
+        if (!monthKey) return currentMonthKey();
+        const [yyyy, mm] = monthKey.split('-').map(Number);
+        const d = new Date(yyyy, mm - 1 + delta, 1);
+        return monthKeyFromDateObj(d);
+      };
+
+      const ownerFromPaymentSource = (src) => {
+        const s = norm(src);
+        if (!s) return null;
+        if (s.includes('2581') || s.includes('guilherme')) return 'Guilherme';
+        if (s.includes('1009') || s.includes('thais')) return 'Thais';
+        if (s.includes('7292') || s.includes('digital')) return 'Ambos';
+        return null;
+      };
+
+      // --- DETECÇÃO DE COLUNAS (Flexível) ---
+      const detectColumns = (headerRow = []) => {
+        const h = headerRow.map(norm);
+        const find = (re) => h.findIndex((x) => re.test(x));
+        return {
+          idxDescricao: find(/^(descricao|descrição|estabelecimento|historico|histórico|loja|detalhe)/),
+          // Remove ^ para pegar "Qtd Parcelas", "Nº Parcela", etc.
+          idxParcela:   find(/(parcela|parcelas|prest|n\S* parc|qtd.*parc)/),   
+          idxData:      find(/^(data|lan[cç]amento|transa[cç][aã]o)/),
+          idxValorBRL:  find(/^(valor.*r\$|valor ?em r\$??)/),
+          idxValorGen:  find(/^(valor|amount|total|d[eé]bito|cr[eé]dito)/),
+          idxTitular:   find(/(titular|portador|nome do titular|cliente)/),
+        };
+      };
+
+      const getDescriptionFromRow = (row = [], cols) => {
+        let desc = cols.idxDescricao >= 0 ? row[cols.idxDescricao] : "";
+        if (!String(desc || "").trim()) {
+          const titular = cols.idxTitular >= 0 ? String(row[cols.idxTitular] || "") : "";
+          let best = "";
+          for (const cell of row) {
+            const s = String(cell || "").trim();
+            if (s.length >= 3 && s !== titular && !/r\$\s*\d/.test(s) && !/^\d{1,2}\/\d{1,2}/.test(s)) {
+              if (s.length > best.length) best = s;
+            }
+          }
+          desc = best;
+        }
+        desc = String(desc || "").replace(/\s+/g, " ").trim();
+        const titular = cols.idxTitular >= 0 ? String(row[cols.idxTitular] || "") : "";
+        if (desc && titular && norm(desc) === norm(titular)) {
+          for (const cell of row) {
+            const s = String(cell || "").trim();
+            if (s && norm(s) !== norm(titular) && s.length > 3 && !/r\$\s*\d/.test(s)) {
+              desc = s; break;
+            }
+          }
+        }
+        return desc;
+      };
+
+      /* ========= MIGRATION UTILS ========= */
+      async function backfillAllMonthKeys(db) {
+        if (!window.FirebaseLib) return;
+        const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;
+        const expCol = collection(db, 'expenses');
+        let lastDoc = null;
+        let totalAtualizados = 0;
+        while (true) {
+          let constraints = [orderBy(documentId()), limit(500)];
+          if (lastDoc) constraints.push(startAfter(lastDoc));
+          const q = query(expCol, ...constraints);
+          const snap = await getDocs(q);
+          if (snap.empty) break;
+          const batch = writeBatch(db);
+          let changed = 0;
+          snap.docs.forEach(dSnap => {
+            const d = dSnap.data() || {};
+            if (!d.monthKey && d.date) {
+              const mk = monthKeyFromPtDate(d.date);
+              if (mk) { batch.update(dSnap.ref, { monthKey: mk }); changed++; }
+            }
+          });
+          if (changed > 0) { await batch.commit(); totalAtualizados += changed; }
+          lastDoc = snap.docs[snap.docs.length - 1];
+        }
+        if(totalAtualizados > 0) localStorage.setItem('mkBackfillDone', '1');
+      }
+
+      async function backfillSplitFromPaidBy(db) {
+        if (!window.FirebaseLib) return;
+        const { collection, query, orderBy, limit, startAfter, getDocs, writeBatch, documentId } = window.FirebaseLib;
+        const expCol = collection(db, "expenses");
+        let last = null, total = 0;
+        while (true) {
+          let constraints = [orderBy(documentId()), limit(500)];
+          if (last) constraints.push(startAfter(last));
+          const q = query(expCol, ...constraints);
+          const snap = await getDocs(q);
+          if (snap.empty) break;
+          const batch = writeBatch(db);
+          let changed = 0;
+          snap.docs.forEach(doc => {
+            const d = doc.data() || {};
+            const current = norm(d.split);
+            const who = norm(d.paidBy || d.owner || d.user || d.person || d.responsavel);
+            if ((!current || current === "dividido") && (who === "guilherme" || who === "thais")) {
+              const newSplit = who === "guilherme" ? "Guilherme" : "Thais";
+              batch.update(doc.ref, { split: newSplit });
+              changed++;
+            }
+          });
+          if (changed > 0) { await batch.commit(); total += changed; }
+          last = snap.docs[snap.docs.length - 1];
+        }
+        if(total > 0) localStorage.setItem('splitBackfillDone', '1');
+      }
+
+      window.removeZeroAmountForMonth = async (db, currentMonth) => {
+        if(!db || !currentMonth || !window.FirebaseLib) return;
+        const { collection, query, where, getDocs, writeBatch } = window.FirebaseLib;
+        const exp = collection(db, 'expenses');
+        const snap = await getDocs(query(exp, where('monthKey','==', currentMonth)));
+        const batch = writeBatch(db);
+        let count = 0;
+        snap.forEach(doc => {
+          const d = doc.data();
+          if (Number(d.amount) === 0) { batch.delete(doc.ref); count++; }
+        });
+        if (count) await batch.commit();
+        console.log('Removidos com amount=0:', count);
+      };
+
+      window.limparParcelasQueSaoData = async (db, monthKey) => {
+        if(!db || !monthKey || !window.FirebaseLib) return;
+        const { collection, query, where, getDocs, writeBatch, deleteField } = window.FirebaseLib;
+        const exp = collection(db, 'expenses');
+        const snap = await getDocs(query(exp, where('monthKey','==', monthKey)));
+        const batch = writeBatch(db);
+        let count = 0;
+        snap.docs.forEach(doc => {
+          const d = doc.data() || {};
+          if (!d.parcela || !d.date) return;
+          const m = String(d.date).match(/^(\d{1,2})\/(\d{1,2})\/\d{2,4}$/);
+          if (!m) return;
+          const diaMes = `${parseInt(m[1],10)}/${parseInt(m[2],10)}`;
+          if (d.parcela === diaMes) {   
+              batch.update(doc.ref, { parcela: deleteField() });   
+              count++;   
+          }
+        });
+        if (count > 0) await batch.commit();
+        console.log('Parcelas removidas (eram dia/mês da data):', count);
+      };
+
+      /* ========= Components ========= */
+      const Modal = ({ isOpen, onClose, children }) => {
+        if (!isOpen) return null;
+        return (
+          <div className="fixed inset-0 bg-black/60 flex justify-center items-center p-4 z-50 modal-enter backdrop-blur-sm" onClick={onClose}>
+            <div className={ui.modal} onClick={(e)=>e.stopPropagation()}>
+              {children}
+            </div>
+          </div>
+        );
+      };
+
+      const UserSelectionScreen = ({ onSelectUser }) => (
+        <div className="min-h-screen flex flex-col justify-center items-center p-6 bg-slate-50 dark:bg-slate-900">
+          <h1 className="text-4xl font-bold mb-2 text-slate-800 dark:text-white">Meu Acerto</h1>
+          <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
+          <div className="space-y-4 w-full max-w-xs">
+            {['Guilherme', 'Thais'].map(u => (
+              <button key={u} onClick={() => onSelectUser(u)}
+                className={`w-full py-3 rounded-xl text-white font-semibold shadow-lg hover:brightness-110 transition-all hover:scale-105  
+                ${u === 'Thais' ? 'bg-pink-600' : 'bg-indigo-600'}`}>
+                {u}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+
+      /* ========= Dashboard ========= */
+      const Dashboard = ({ user, onLogout, db }) => {
+        const [expenses, setExpenses] = useState([]);
+        const [installmentPlans, setInstallmentPlans] = useState([]);
+        const [monthsFromDb, setMonthsFromDb] = useState([]);
+
+        const [currentMonth, setCurrentMonth] = useState(() => currentMonthKey());
+
+        const [filterType, setFilterType] = useState('Todos');
+        const [scope, setScope] = useState('geral');
+
+        const [isAddOpen, setIsAddOpen] = useState(false);
+        const [isImportOpen, setIsImportOpen] = useState(false);
+        const [isClearOpen, setIsClearOpen] = useState(false);
+        const [isDelOpen, setDelOpen] = useState(false);
+
+        const [delTarget, setDelTarget] = useState(null);
+        const [deleting, setDeleting] = useState(false);
+        const [importedExpenses, setImportedExpenses] = useState([]);
+        const [isImporting, setIsImporting] = useState(false);
+        const fileInputRef = useRef(null);
+
+        // Ensure refs are initialized
+        const valorRef = useRef(null);
+
+        const formatBRLInput = (digits, negative=false) => {
+          const n = (Number(digits) || 0) / 100;
+          const fmt = n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return negative ? `-${fmt}` : fmt;
+        };
+        const handleValorChange = (e) => {
+          const raw = e.target.value;
+          const negative = raw.trim().startsWith('-');
+          const digits = raw.replace(/\D/g, '');
+          if (!digits) { setFValor(negative ? '-' : ''); return; }
+          setFValor(formatBRLInput(digits, negative));
+        };
+
+        const [fDesc, setFDesc] = useState('');
+        const [fValor, setFValor] = useState('');
+        const [fData, setFData] = useState(() => new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
+        const [fTipo, setFTipo] = useState('Cartão');
+        const [fSplit, setFSplit] = useState('Dividido');
+        const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
+        const [fParcela, setFParcela] = useState('');
+        const [salvando, setSalvando] = useState(false);
+        const [editingId, setEditingId] = useState(null);
+
+        const fb = window.FirebaseLib;
+        if (!fb) return null; // Safety check for render
+
+        const { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, runTransaction, writeBatch, query, where } = fb;
+
+        const theme = user === 'Thais'   
+          ? { text:'text-pink-600 dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700' }
+          : { text:'text-indigo-600 dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700' };
+
+        // Listeners
+        useEffect(() => {
+          if (!db || !fb) return;
+          const plansRef = collection(db, 'installmentPlans');
+          const unsub = onSnapshot(plansRef, (s) => setInstallmentPlans(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+          return () => unsub();
+        }, [db]);
+
+        useEffect(() => {
+          if (!db || !fb) return;
+          const expRef = collection(db, 'expenses');
+          const unsub = onSnapshot(expRef, (s) => {
+             const set = new Set();
+             s.forEach(d => { const mk = d.data().monthKey; if(mk) set.add(mk); });
+             setMonthsFromDb(Array.from(set).sort());
+          });
+          return () => unsub();
+        }, [db]);
+
+        useEffect(() => {
+          if (!db || !currentMonth || !fb) return;
+          const expRef = collection(db, 'expenses');
+          const q = query(expRef, where('monthKey', '==', currentMonth));
+          const unsub = onSnapshot(q, (s) => {
+              setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })));
+          });
+          return () => unsub();
+        }, [db, currentMonth]);
+
+        // Geração Parcelas
+        useEffect(() => {
+          if (!installmentPlans.length || !db || !fb) return;
+          const generate = async () => {
+             const expCol = collection(db, 'expenses');
+             const batch = writeBatch(db);
+             let hasWrites = false;
+             for (const plan of installmentPlans) {
+                 if (!plan.startDate || !plan.numberOfInstallments || !plan.totalAmount) continue;
+                 const [dd, mm, yyyy] = String(plan.startDate).split('/').map(Number);
+                 const start = new Date(yyyy, mm - 1, dd, 12);
+                 const deletedSet = new Set(plan.deletedParcels || []);
+                 const per = round2(plan.totalAmount / plan.numberOfInstallments);
+                 const last = round2(plan.totalAmount - per * (plan.numberOfInstallments - 1));
+                 for (let i = 0; i < plan.numberOfInstallments; i++) {
+                     const d = new Date(start.getFullYear(), start.getMonth() + i, start.getDate(), 12);
+                     const parcelaKey = `${i+1}/${plan.numberOfInstallments}`;
+                     if (deletedSet.has(parcelaKey)) continue;
+                     const mk = monthKeyFromDateObj(d);
+                     const dateStr = d.toLocaleDateString('pt-PT', { timeZone: 'UTC' });
+                     const amount = (i+1) === plan.numberOfInstallments ? last : per;
+                     const qDup = query(expCol, where('installmentPlanId','==', plan.id), where('parcela','==', parcelaKey), where('monthKey','==', mk));
+                     const snap = await window.FirebaseLib.getDocs(qDup);
+                     if (snap.empty) {
+                         const newRef = doc(expCol);
+                         batch.set(newRef, {
+                             installmentPlanId: plan.id, description: plan.description, amount,
+                             date: dateStr, parcela: parcelaKey, split: plan.split || 'Dividido',
+                             type: plan.type || 'Cartão', paymentSource: plan.paymentSource || 'Cartão',
+                             paidBy: 'Cartão', monthKey: mk,
+                             // Auto-generated installments are marked as such
+                             isInstallment: true,
+                             installmentCurrent: i+1,
+                             installmentTotal: plan.numberOfInstallments
+                         });
+                         hasWrites = true;
+                     }
+                 }
+             }
+             if (hasWrites) await batch.commit();
+          };
+          generate();
+        }, [installmentPlans, db]);
+
+        /* ==== Derivados ==== */
+        const availableMonths = useMemo(() => {
+          const set = new Set(monthsFromDb);
+          set.add(currentMonth);
+          return Array.from(set).sort();
+        }, [monthsFromDb, currentMonth]);
+
+        const expensesForScope = useMemo(() => {
+          let base = expenses;
+          if (scope === 'cartao') base = base.filter(e => e.type === 'Cartão');
+          else if (scope === 'pixboleto') base = base.filter(e => ['Pix', 'Boleto', 'Ajuste'].includes(e.type));
+          return base;
+        }, [expenses, scope]);
+
+        // --- FILTERED LIST (Agora usa visibleExpensesForScope) ---
+
+        const visibleExpensesForScope = useMemo(() => {
+          return expensesForScope.filter(e => {
+            if (!e.panelUser) return true; // docs antigos aparecem pra ambos
+            return e.panelUser === user;
+          });
+        }, [expensesForScope, user]);
+
+        const filteredList = useMemo(() => {
+          let base = visibleExpensesForScope;
+          if (filterType !== 'Todos') {
+              if (filterType === 'Parcelado') {
+                  base = base.filter(e => e.isInstallment || (e.installmentTotal && e.installmentTotal > 1));
+              } else {
+                  base = base.filter(e => e.type === filterType);
+              }
+          }
+          return base.sort((a,b) => {
+              const da = ptDateToDateObj(a.date);
+              const db = ptDateToDateObj(b.date);
+              return (da && db) ? da - db : 0;
+          });
+        }, [visibleExpensesForScope, filterType]);
+
+        // --- TOTAIS (ATUALIZADO V2) ---
+        const { partG, partT, gPaid, tPaid } = useMemo(() => {
+          let pG = 0, pT = 0, paidG = 0, paidT = 0;
+
+          for (const e of expensesForScope) {
+            const val = Number(e.amount || 0);
+
+            // 🌎 PARTE JUSTA (quanto cada um "gastou" nesse lançamento)
+            if (e.split === 'Dividido') {
+              pG += val / 2;
+              pT += val / 2;
+            } else if (e.split === 'Guilherme') {
+              pG += val;
+            } else if (e.split === 'Thais') {
+              pT += val;
+            }
+
+            // 💸 QUEM PAGOU DE FATO
+            if (e.type === 'Cartão') {
+              // Regra da vida real: Guilherme paga 100% de TODAS as faturas
+              paidG += val;
+            } else {
+              // Pix / Boleto / Ajuste usam o campo paidBy
+              if (e.paidBy === 'Guilherme') paidG += val;
+              else if (e.paidBy === 'Thais') paidT += val;
+            }
+          }
+
+          return {
+            partG: round2(pG),
+            partT: round2(pT),
+            gPaid: round2(paidG),
+            tPaid: round2(paidT),
+          };
+        }, [expensesForScope]);
+
+        const difGastos = round2(partG - partT);
+        const valorDevolverSePagarTudo = user === 'Guilherme' ? round2(gPaid - partG) : round2(tPaid - partT);
+
+        // --- SALDO DEVEDOR (AGORA RESPEITA O FILTRO scope) ---
+        const saldoDevedorThais = useMemo(() => {
+          let pG = 0;    // parte justa do Guilherme dentro do escopo atual
+          let paidG = 0; // quanto Guilherme realmente pagou dentro do escopo atual
+
+          for (const e of expensesForScope) {
+            const val = Number(e.amount || 0);
+
+            // 🌎 PARTE JUSTA DO GUILHERME (em qualquer tipo)
+            if (e.split === 'Dividido') {
+              pG += val / 2;
+            } else if (e.split === 'Guilherme') {
+              pG += val;
+            } // se split = Thais, parte do Gui é 0
+
+            // 💸 QUANTO O GUILHERME PAGOU MESMO
+            if (e.type === "Cartão") {
+              // Você paga 100% de todas as faturas (todos os cartões)
+              paidG += val;
+            } else {
+              // Pix / Boleto / Ajuste
+              if (e.paidBy === "Guilherme") {
+                paidG += val;
+              }
+            }
+          }
+
+          // Se paidG > pG, Guilherme pagou mais do que devia -> Thais deve
+          // Se paidG < pG, Thais pagou mais (ou Ajustes compensaram) -> saldo diminui
+          return round2(paidG - pG);
+        }, [expensesForScope]);
+
+        const cardTotals = useMemo(() => {
+          let tot=0, g=0, t=0, d=0;
+          for (const e of expenses) {
+              if (e.type !== 'Cartão') continue;
+              const val = Number(e.amount||0);
+              tot+=val;
+              const o = ownerFromPaymentSource(e.paymentSource);
+              if (o === 'Guilherme') g+=val;
+              else if (o === 'Thais') t+=val;
+              else if (o === 'Ambos') d+=val;
+          }
+          return { grandTotal: round2(tot), gCard: round2(g), tCard: round2(t), dCard: round2(d) };
+        }, [expenses]);
+
+        // Valor que "some" da fatura no mês seguinte (parcelas que terminam neste mês)
+        const freedNextInvoice = useMemo(() => {
+          let total = 0;
+          let totalG = 0;
+          let totalT = 0;
+          let count = 0;
+          const seen = new Set();
+
+          for (const e of expenses) {
+            const totalI = Number(e.installmentTotal || 0);
+            const currentI = Number(e.installmentCurrent || 0);
+
+            // Só considera lançamentos que são parcelas e estão na ÚLTIMA
+            if (!totalI || !currentI) continue;
+            if (totalI <= 1) continue;
+            if (currentI !== totalI) continue; // apenas última
+
+            const key = 
+              e.installmentPlanId || 
+              `${norm(e.description)}|${norm(e.paymentSource)}|${totalI}`;
+
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const val = Number(e.amount || 0);
+            total += val;
+            count++;
+
+            // Que parte é do Gui e da Thais
+            if (e.type === "Cartão") {
+              const owner = ownerFromPaymentSource(e.paymentSource);
+              if (owner === "Guilherme") {
+                totalG += val;
+              } else if (owner === "Thais") {
+                totalT += val;
+              } else if (owner === "Ambos") {
+                totalG += val / 2;
+                totalT += val / 2;
+              }
+            } else {
+              // Parcelados em Pix/Boleto (se algum dia aparecer)
+              if (e.paidBy === "Guilherme") totalG += val;
+              else if (e.paidBy === "Thais") totalT += val;
+            }
+          }
+
+          return {
+            total: round2(total),
+            count,
+            totalG: round2(totalG),
+            totalT: round2(totalT),
+          };
+        }, [expenses]);
+
+        // --- HELPER DE ESTILO DE PARCELA ---
+        const isLastInstallment = (e) => {
+          const total = Number(e.installmentTotal || 0);
+          const current = Number(e.installmentCurrent || 0);
+
+          if (total > 1 && current === total) return true;
+
+          // fallback: se vier só como string "3/3"
+          if (typeof e.parcela === "string") {
+            const m = e.parcela.match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (m) {
+              const c = Number(m[1]);
+              const t = Number(m[2]);
+              return t > 1 && c === t;
+            }
+          }
+          return false;
+        };
+
+        /* ==== Ações ==== */
+
+        // --- NOVA FUNÇÃO DE FECHAR O MODAL E LIMPAR ESTADO ---
+        const closeAddModal = () => {
+            setIsAddOpen(false);
+            setEditingId(null);
+            setFDesc('');
+            setFValor('');
+            setFParcela('');
+        };
+
+        // --- salvarLancamento (COM SUPORTE A panelUser) ---
+        const salvarLancamento = async () => {
+          const val = parseMoney(fValor);
+
+          // Validação básica
+          if (!fDesc || !Number.isFinite(val)) {
+              console.warn('Dados inválidos ao salvar lançamento');
+              return;
+          }
+
+          const mk = monthKeyFromPtDate(fData) || currentMonth;
+          setSalvando(true);
+
+          const expCol = collection(db, 'expenses');
+
+          // 🔹 Definir de quem é esse lançamento (painel)
+          let panelUser = user; // padrão: quem está logado
+
+          if (fTipo === 'Cartão') {
+              const s = norm(fFonte);
+              if (s.includes('1009')) {
+                  panelUser = 'Thais';
+              } else if (s.includes('2581') || s.includes('7292')) {
+                  panelUser = 'Guilherme'; // cartão Guilherme + digital ficam no painel do Gui
+              }
+          } else {
+              // Pix / Boleto / Ajuste: fica no painel de quem está usando
+              if (user === 'Guilherme' || user === 'Thais') {
+                  panelUser = user;
+              }
+          }
+
+          // Detecta se é parcela digitada no campo
+          const instObj = parseInstallmentFromCell(fParcela);
+
+          const payload = {
+              description: fDesc,
+              amount: val,
+              date: fData,
+              split: fTipo === 'Ajuste' ? 'Guilherme' : fSplit,
+              type: fTipo,
+              paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,
+              paidBy: fTipo === 'Cartão' ? 'Cartão' : (fTipo === 'Ajuste' ? 'Thais' : user),
+              monthKey: mk,
+              parcela: instObj.isInstallment ? instObj.info : null,
+              isInstallment: instObj.isInstallment,
+              installmentCurrent: instObj.current,
+              installmentTotal: instObj.total,
+              panelUser, // 🔹 novo campo
+          };
+
+          // Remove campos undefined
+          Object.keys(payload).forEach((k) => {
+              if (payload[k] === undefined) delete payload[k];
+          });
+
+          try {
+              if (editingId) {
+                  // ⚠️ NÃO alterar o mês da fatura ao editar
+                  delete payload.monthKey;
+
+                  // ⚠️ Usa ref direta com db/collection/id para evitar qualquer zica
+                  const ref = doc(db, 'expenses', editingId);
+                  await updateDoc(ref, payload);
+              } else {
+                  await addDoc(expCol, payload);
+              }
+
+              // Limpa e fecha modal
+              closeAddModal();
+          } catch (e) {
+              console.error('Erro ao salvar lançamento:', e);
+          }
+
+          setSalvando(false);
+        };
+
+        // --- NOVA FUNÇÃO DE ABRIR MODAL PARA EDIÇÃO ---
+        const openEditModal = (e) => {
+            setEditingId(e.id);
+            setFDesc(e.description || '');
+            const valNum = Number(e.amount || 0);
+            setFValor(valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            setFData(e.date || new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
+            setFTipo(e.type || 'Cartão');
+            setFSplit(e.split || 'Dividido');
+            setFFonte(e.paymentSource || (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'));
+            setFParcela(e.parcela || '');
+            setIsAddOpen(true);
+        };
+
+        const makeDedupeKey = (e) => 
+          `${norm(e.description)}|${e.amount}|${e.date}|${e.parcela||''}|${norm(e.type)}|${norm(e.paymentSource)}|${e.monthKey}`;
+
+        const handleFileChange = async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setIsImporting(true);
+          try {
+              const rows = await readSpreadsheetFile(file);
+              if (!rows.length) throw new Error("Vazio");
+
+              // --- SMART IMPORT (V5 - Detecção Prioritária Coluna F) ---
+              const normH = (h) => norm(h || '');
+              const isHeaderRow = (r=[]) => {
+                  const s = r.map(x => norm(x));
+                  const hasData = s.some(c => /\bdata\b/.test(c));
+                  const hasDesc = s.some(c => /(descri|estab|hist|favorecido|detalhe|loja|comprovante)/.test(c));
+                  const hasValor = s.some(c => /(valor|d[eé]bito|cr[eé]dito|amount|total)/.test(c));
+                  return (hasData && hasValor) || (hasData && hasDesc);
+              };
+              let headerIdx = rows.findIndex(isHeaderRow);
+              if (headerIdx < 0) headerIdx = 0;
+
+              const header = rows[headerIdx] || [];
+              const body = rows.slice(headerIdx + 1);
+              const cols = detectColumns(header);   
+
+              const mapped = [];
+              for (const row of body) {
+                  const rawDate = cols.idxData >= 0 ? row[cols.idxData] : null;
+                  let dateStr = null;
+                  if (rawDate) dateStr = excelSerialToPT(rawDate);
+                  if (!dateStr) {
+                     for (const c of row) {
+                         const s = String(c).trim();
+                         if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) { dateStr=s; break; }
+                     }
+                  }
+                  if (!dateStr) continue;
+
+                  // Keep "real" month key just in case, but import into CURRENTLY VIEWED month
+                  const mk = monthKeyFromPtDate(dateStr);
+
+                  const desc = getDescriptionFromRow(row, cols);
+                  if (shouldIgnorePaymentInclusion(row, desc)) continue;
+
+                  let amount = NaN;
+                  if (cols.idxValorBRL >= 0) amount = parseMoney(row[cols.idxValorBRL]);
+                  if (!Number.isFinite(amount) && cols.idxValorGen >= 0) amount = parseMoney(row[cols.idxValorGen]);
+                  if (!Number.isFinite(amount)) {
+                      for (let i = row.length - 1; i >= 0; i--) {
+                          const n = parseMoney(row[i]);
+                          if (Number.isFinite(n) && Math.abs(n) > 0) { amount = n; break; }
+                      }
+                  }
+                  if (!Number.isFinite(amount)) continue;
+
+                  // --- PARCELA: detecta usando a linha inteira, dando prioridade à coluna de parcelas ---
+                  const parcelaInfo = detectInstallmentForRow(row, cols);
+
+                  const last4 = last4FromRow(row);
+                  let source = 'Cartão';
+                  if (last4 === "2581") source = "Cartão Guilherme (final 2581)";
+                  else if (last4 === "1009") source = "Cartão Thais (final 1009)";
+                  else if (last4 === "7292") source = "Cartão Digital (final 7292)";
+
+                  // 🔹 De quem é esse lançamento no painel?
+                  let panelUser = 'Guilherme'; // padrão
+                  const sSrc = norm(source);
+                  if (sSrc.includes('1009')) {
+                      panelUser = 'Thais';
+                  } else if (sSrc.includes('2581') || sSrc.includes('7292')) {
+                      panelUser = 'Guilherme';
+                  }
+
+                  mapped.push({
+                      description: desc,   
+                      amount: round2(Math.abs(amount)),
+                      date: dateStr,   
+                      type: 'Cartão',   
+                      paymentSource: source,   
+                      split: 'Dividido',   
+                      paidBy: 'Cartão',
+
+                      // --- FORÇA O MÊS ATUAL NA IMPORTAÇÃO ---
+                      monthKey: currentMonth,
+                      originalMonthKey: mk,
+
+                      parcela: parcelaInfo.isInstallment ? parcelaInfo.info : null,
+                      isInstallment: parcelaInfo.isInstallment,
+                      installmentTotal: parcelaInfo.total,
+                      installmentCurrent: parcelaInfo.current,
+                      installmentPlanId: parcelaInfo.isInstallment
+                        ? `${norm(desc)}|${last4 || 'nocard'}|${parcelaInfo.total}`
+                        : null,
+                      panelUser, // 🔹 aqui
+                  });
+              }
+
+              setImportedExpenses(mapped);
+              setIsImportOpen(true);
+          } catch(err) { console.error(err); }
+          setIsImporting(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        };
+
+        const confirmImport = async () => {
+          if (!importedExpenses.length) return;
+
+          setIsImporting(true);
+
+          // Pre-load existing data to dedupe
+          const monthsInFile = [...new Set(importedExpenses.map(e => e.monthKey))];
+          const expRef = collection(db, 'expenses');
+          const existingKeys = new Set();
+
+          await Promise.all(monthsInFile.map(async (mk) => {
+              const q = query(expRef, where('monthKey', '==', mk));
+              const snap = await window.FirebaseLib.getDocs(q);
+              snap.forEach(doc => {
+                  const e = doc.data();
+                  existingKeys.add(makeDedupeKey(e));
+              });
+          }));
+
+          const batch = writeBatch(db);
+          let count = 0;
+          importedExpenses.forEach(imp => {
+              const key = makeDedupeKey(imp);
+              if (!existingKeys.has(key)) {   
+                  const { installmentPlanId, ...toSave } = imp;
+                  if (imp.installmentPlanId) toSave.installmentPlanId = imp.installmentPlanId;
+
+                  // Remove undefined fields
+                  Object.keys(toSave).forEach(key => toSave[key] === undefined && delete toSave[key]);
+
+                  batch.set(doc(expRef), toSave);   
+                  count++;   
+              }
+          });
+          if (count > 0) await batch.commit();
+          setIsImportOpen(false);
+          setImportedExpenses([]);
+          setIsImporting(false);
+        };
+
+        const doDelete = async () => {
+          if (!delTarget) return;
+          setDeleting(true);
+          const expRef = doc(db, 'expenses', delTarget.id);
+          try {
+               if (delTarget.installmentPlanId && delTarget.parcela) {
+                   const planRef = doc(db, 'installmentPlans', delTarget.installmentPlanId);
+                   await runTransaction(db, async (t) => {
+                       const planSnap = await t.get(planRef);
+                       if (planSnap.exists()) {
+                           const data = planSnap.data();
+                           const deleted = data.deletedParcels || [];
+                           t.update(planRef, { deletedParcels: [...deleted, delTarget.parcela] });
+                       }
+                       t.delete(expRef);
+                   });
+               } else { await deleteDoc(expRef); }
+               setDelTarget(null);
+               setDelOpen(false);
+          } catch(e) { console.error(e); }
+          setDeleting(false);
+        };
+
+        // --- LIMPAR APENAS MÊS ATUAL (COM SUPORTE A panelUser) ---
+        const clearCurrentMonth = async () => {
+          try {
+              const expRef = collection(db, 'expenses');
+              const q = query(
+                  expRef,   
+                  where('monthKey','==', currentMonth),
+                  where('panelUser', '==', user) // 🔹 só do painel atual
+              );
+              const snap = await window.FirebaseLib.getDocs(q);
+              const batch = writeBatch(db);
+              snap.forEach(d => batch.delete(d.ref));
+              await batch.commit();
+              setIsClearOpen(false);
+          } catch(e) { console.error(e); }
+        };
+
+        const clearAll = async () => {
+           try {
+               const q = query(collection(db, 'expenses'));
+               const snap = await window.FirebaseLib.getDocs(q);
+               const batch = writeBatch(db);
+               snap.forEach(d => batch.delete(d.ref));
+               await batch.commit();
+               setIsClearOpen(false);
+           } catch(e) { console.error(e); }
+        };
+
+        // Abas visíveis conforme o usuário
+        const tabsForUser =
+          user === 'Thais'
+            ? ['Todos', 'Cartão', 'Pix', 'Boleto', 'Ajuste', 'Parcelado']
+            : ['Todos', 'Cartão', 'Pix', 'Boleto', 'Parcelado'];
+
+        /* ==== UI ==== */
+        return (
+          <div className="min-h-screen flex flex-col pb-12 bg-slate-50 dark:bg-slate-900">
+              <header className="bg-white dark:bg-slate-800 shadow-sm px-4 py-3 flex justify-between items-center sticky top-0 z-10">
+                  <div className="flex items-center gap-2">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold ${theme.bg}`}>{user[0]}</div>
+                      <div><h1 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">Meu Acerto</h1><p className="text-xs text-slate-500 dark:text-slate-400">Mês: {monthLabel(currentMonth)}</p></div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1 text-[11px] sm:text-xs overflow-x-auto whitespace-nowrap">
+                        {['geral','cartao','pixboleto'].map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => setScope(s)}
+                            className={
+                              `px-2 sm:px-3 py-1 rounded-md font-medium transition ` +
+                              (scope === s
+                                ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300'
+                                : 'text-slate-500 dark:text-slate-400')
+                            }
+                          >
+                            {s === 'geral' ? 'Geral' : s === 'cartao' ? 'Cartão' : 'Pix'}
+                          </button>
+                        ))}
+                      </div>
+                     <button onClick={onLogout} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300">
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                     </button>
+                  </div>
+              </header>
+
+              <main className="max-w-5xl mx-auto w-full p-4 space-y-4">
+                  <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 rounded-xl shadow-sm">
+                      <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, -1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300">◀</button>
+                      <div className="flex items-center gap-2">
+                          <select value={currentMonth} onChange={e=>setCurrentMonth(e.target.value)} className="bg-transparent font-semibold text-center outline-none cursor-pointer text-slate-900 dark:text-slate-100">
+                              {availableMonths.map(m => <option key={m} value={m} className="dark:bg-slate-800">{monthLabel(m)}</option>)}
+                          </select>
+                      </div>
+                      <button onClick={()=>setCurrentMonth(m => shiftMonthKey(m, 1))} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300">▶</button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Divisão ({scope})</p>
+                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partG)}</span></div>
+                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partT)}</span></div>
+                          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500 dark:text-slate-400"><span>Diferença</span><span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(difGastos)}</span></div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Pagamentos ({scope})</p>
+                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(gPaid)}</span></div>
+                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(tPaid)}</span></div>
+                          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">Se {user} quitar tudo: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(valorDevolverSePagarTudo)}</span></div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-bl-full -mr-4 -mt-4"></div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                            Saldo ({scope === 'geral' ? 'Geral' : scope === 'cartao' ? 'Cartão' : 'Pix / Boleto'}) (Thais → Gui)
+                          </p>
+                          <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{formatBRL(saldoDevedorThais)}</p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Total faturas: {formatBRL(cardTotals.grandTotal)}</p>
+                      </div>
+                  </div>
+
+                  {/* NOVO CARD – Resumo das Faturas de Cartão */}
+                  <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-1"> 
+                      Faturas de cartão ({monthLabel(currentMonth)})
+                      </p>
+
+                      <div className="flex justify-between items-end mb-2">
+                      <span className="text-sm text-slate-700 dark:text-slate-200"> 
+                          Total geral (todos os cartões)
+                      </span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100"> 
+                          {formatBRL(cardTotals.grandTotal)}
+                      </span>
+                      </div>
+
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-300"> 
+                          Cartão Thais (final 1009)
+                          </span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100"> 
+                          {formatBRL(cardTotals.tCard)}
+                          </span>
+                      </div>
+
+                      <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-300"> 
+                          Cartão Guilherme (final 2581)
+                          </span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100"> 
+                          {formatBRL(cardTotals.gCard)}
+                          </span>
+                      </div>
+
+                      <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-300"> 
+                          Cartão Digital (final 7292)
+                          </span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100"> 
+                          {formatBRL(cardTotals.dCard)}
+                          </span>
+                      </div>
+                      </div>
+                  </div>
+
+                  {freedNextInvoice.count > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-3">
+                      <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-100 mb-1"> 
+                        Alívio na próxima fatura
+                      </p>
+
+                      <div className="flex items-end justify-between">
+                        <span className="text-sm text-emerald-900 dark:text-emerald-100"> 
+                          Valor que deixa de ser cobrado
+                        </span>
+                        <span className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300"> 
+                          {formatBRL(freedNextInvoice.total)}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-emerald-800 dark:text-emerald-200 mt-1"> 
+                        {freedNextInvoice.count === 1 
+                          ? "1 parcela termina neste mês." 
+                          : `${freedNextInvoice.count} parcelas terminam neste mês.`}
+                      </p>
+
+                      <p className="text-[11px] text-emerald-800 dark:text-emerald-200"> 
+                        Sua parte:{" "} 
+                        <span className="font-semibold"> 
+                          {formatBRL(
+                            user === "Guilherme" 
+                              ? freedNextInvoice.totalG 
+                              : freedNextInvoice.totalT
+                          )}
+                        </span>
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                      <button onClick={()=>{
+                          setEditingId(null);
+                          setFDesc('');
+                          setFValor('');
+                          setFParcela('');
+                          setFTipo('Cartão');
+                          setFSplit('Dividido');
+                          setFFonte(
+                              user === 'Guilherme'
+                              ? 'Cartão Guilherme (final 2581)'
+                              : 'Cartão Thais (final 1009)'
+                          );
+                          setFData(new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
+                          setIsAddOpen(true);
+                      }} className={`flex-shrink-0 px-4 py-2 rounded-xl text-white font-semibold shadow ${theme.bg} ${theme.hover}`}>+ Novo</button>
+                      <button onClick={()=>fileInputRef.current?.click()} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Importar</button>
+                      <input ref={fileInputRef} type="file" hidden onChange={handleFileChange} />
+                      <button onClick={()=>setIsClearOpen(true)} className="flex-shrink-0 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 shadow text-red-500 hover:bg-red-50 dark:hover:bg-slate-700">Limpar</button>
+                  </div>
+
+                  <div className="rounded-2xl overflow-hidden">
+                      <div className="flex gap-2 p-1 mb-2 overflow-x-auto">
+                           {tabsForUser.map(f => (
+                               <button 
+                                 key={f} 
+                                 onClick={() => setFilterType(f)}
+                                 className={`px-3 py-1 rounded-full text-xs transition ${
+                                   filterType === f 
+                                     ? theme.bg + ' text-white' 
+                                     : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                                 }`}
+                               >
+                                 {f}
+                               </button>
+                            ))}
+                      </div>
+
+                      <div className="flex flex-col space-y-2">
+                          {filteredList.length === 0 && <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm bg-white dark:bg-slate-800 rounded-2xl">Nenhum lançamento neste mês.</div>}
+                          {filteredList.map(e => (
+                            <div 
+                              key={e.id} 
+                              className={`relative p-4 pl-5 flex items-center justify-between bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-md transition-all ${stripeBySplit(e)}`}
+                            >
+                              <div className="flex-1 min-w-0 pr-2">
+                                <div className="flex items-baseline gap-2">
+                                  <span className="font-semibold text-sm truncate text-slate-900 dark:text-slate-100">
+                                    {e.description}
+                                  </span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                                    {e.type}
+                                  </span>
+                                  {e.parcela && (
+                                    <span 
+                                      className={
+                                        "text-[10px] px-1.5 py-0.5 rounded font-medium " +
+                                        (isLastInstallment(e) 
+                                          ? "bg-emerald-50 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300" 
+                                          : "bg-indigo-50 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300")
+                                      }
+                                    >
+                                      {e.parcela}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                  {e.date} • {e.paymentSource}
+                                </div>
+                              </div>
+                              
+                              <div className="flex flex-col items-end gap-1">
+                                <div 
+                                  className={`font-bold text-sm ${
+                                    e.amount < 0 
+                                      ? 'text-emerald-500 dark:text-emerald-400' 
+                                      : 'text-slate-900 dark:text-slate-100'
+                                  }`}
+                                >
+                                  {formatBRL(e.amount)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                                  {e.split}
+                                </div>
+                                
+                                {/* Botões de ação */}
+                                <div className="flex gap-1 mt-1">
+                                  <button 
+                                    type="button" 
+                                    onClick={() => openEditModal(e)}
+                                    className="px-2 py-1 rounded-lg text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
+                                  >
+                                    ✏️ Editar
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    onClick={() => { setDelTarget(e); setDelOpen(true); }}
+                                    className="px-2 py-1 rounded-lg text-[10px] bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                                  >
+                                    🗑️ Excluir
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                  </div>
+              </main>
+
+              {/* Modal Novo Lançamento */}
+              <Modal isOpen={isAddOpen} onClose={closeAddModal}>
+                  <h3 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{editingId ? 'Editar Lançamento' : 'Novo Lançamento'}</h3>
+                  <label className={ui.label}>Descrição</label>
+                  <input className={ui.input} placeholder="Ex: Mercado, Uber..." value={fDesc} onChange={e=>setFDesc(e.target.value)} />
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                      <div>
+                          <label className={ui.label}>Valor</label>
+                          <input ref={valorRef} className={ui.input} placeholder="0,00" value={fValor} onChange={handleValorChange} />
+                      </div>
+                      <div>
+                          <label className={ui.label}>Data</label>
+                          <input className={ui.input} placeholder="dd/mm/aaaa" value={fData} onChange={e=>setFData(e.target.value)} />
+                      </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                      <div>
+                          <label className={ui.label}>Tipo</label>
+                          <select className={ui.select} value={fTipo} onChange={e=>setFTipo(e.target.value)}>
+                              <option>Cartão</option><option>Pix</option><option>Boleto</option><option disabled={user!=='Thais'}>Ajuste</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label className={ui.label}>Divisão</label>
+                          <select className={ui.select} value={fSplit} onChange={e=>setFSplit(e.target.value)} disabled={fTipo==='Ajuste'}>
+                              <option>Dividido</option><option>Guilherme</option><option>Thais</option>
+                          </select>
+                      </div>
+                  </div>
+                  <div className="mt-3">
+                      <label className={ui.label}>Cartão / Origem</label>
+                      {fTipo==='Cartão' ? (
+                          <select className={ui.select} value={fFonte} onChange={e=>setFFonte(e.target.value)}>
+                              <option>Cartão Guilherme (final 2581)</option>
+                              <option>Cartão Thais (final 1009)</option>
+                              <option>Cartão Digital (final 7292)</option>
+                          </select>
+                      ) : (
+                          <input className={ui.input} value={fTipo} disabled />
+                      )}
+                  </div>
+                  {fTipo==='Cartão' && (
+                      <div className="mt-3">
+                          <label className={ui.label}>Parcela</label>
+                          <input className={ui.input} placeholder="Parcela (ex: 1/10)" value={fParcela} onChange={e=>setFParcela(e.target.value)} />
+                      </div>
+                  )}
+                  <div className="mt-6 flex items-center justify-end gap-3">
+                      <button className={ui.btnGhost} onClick={closeAddModal}>Cancelar</button>
+                      <button className={ui.btnPrimary} onClick={salvarLancamento} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+                  </div>
+              </Modal>
+
+              {/* Outros Modais (Import, Delete, Clear) mantidos com estilo dark mode */}
+              <Modal isOpen={isImportOpen} onClose={()=>setIsImportOpen(false)}>
+                  <h3 className="font-bold mb-2 text-slate-900 dark:text-slate-100">Confirmar Importação</h3>
+                  <p className="text-sm mb-4 text-slate-600 dark:text-slate-400">Encontrados {importedExpenses.length} itens novos.</p>
+                  <div className="max-h-40 overflow-y-auto bg-slate-50 dark:bg-slate-800 p-2 text-xs mb-4 space-y-1 rounded border dark:border-slate-700">
+                      {importedExpenses.map((e,i)=><div key={i} className="flex justify-between text-slate-700 dark:text-slate-300"><span>{e.description}</span><span>{formatBRL(e.amount)}</span></div>)}
+                  </div>
+                  <button onClick={confirmImport} className={ui.btnPrimary + " w-full"}>Importar {importedExpenses.length} itens</button>
+              </Modal>
+
+              <Modal isOpen={isDelOpen} onClose={()=>setDelOpen(false)}>
+                  <div className="p-2 text-center">
+                      <h3 className="font-bold text-red-500 mb-2">Excluir Lançamento?</h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{delTarget?.description} ({formatBRL(delTarget?.amount)})</p>
+                      <div className="flex justify-center gap-2">
+                          <button onClick={()=>setDelOpen(false)} className={ui.btnGhost}>Cancelar</button>
+                          <button onClick={doDelete} className="rounded-xl px-4 py-2 bg-red-500 text-white font-semibold hover:bg-red-600">Excluir</button>
+                      </div>
+                  </div>
+              </Modal>
+
+              <Modal isOpen={isClearOpen} onClose={()=>setIsClearOpen(false)}>
+                   <div className="p-2 space-y-3">
+                      <h3 className="font-bold text-lg mb-2 text-slate-900 dark:text-slate-100">Limpar Dados</h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Escolha o que deseja apagar:</p>
+                      <button onClick={clearCurrentMonth} className="w-full py-3 rounded-xl bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200 font-semibold hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors">Limpar Apenas {monthLabel(currentMonth)}</button>
+                      <div className="border-t border-slate-100 dark:border-slate-700 my-2"></div>
+                      <button onClick={clearAll} className="w-full py-3 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-semibold hover:bg-red-100 dark:hover:bg-red-900/50 text-xs transition-colors">⚠️ Apagar TUDO (Reset Geral)</button>
+                      <button onClick={()=>setIsClearOpen(false)} className="w-full py-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs mt-2">Cancelar</button>
+                   </div>
+              </Modal>
+          </div>
+        );
+      };
+
+      // ================== APP (Bootstrap Firebase + escolha de usuário) ==================
+      const App = () => {
+        const [db, setDb] = useState(null);
+        const [authReady, setAuthReady] = useState(false);
+        const [panelUser, setPanelUser] = useState(() => {
+          try {
+            return localStorage.getItem('panelUser') || null;
+          } catch {
+            return null;
+          }
+        });
+
+        useEffect(() => {
+          const fb = window.FirebaseLib;
+          if (!fb) return;
+
+          // Evita inicializar o Firebase duas vezes
+          if (!window._meuAcertoApp) {
+            const firebaseConfig = {
+              apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",
+              authDomain: "meu-acerto-app.firebaseapp.com",
+              projectId: "meu-acerto-app",
+              storageBucket: "meu-acerto-app.appspot.com",
+              messagingSenderId: "326844075367",
+              appId: "1:326844075367:web:0315e86713b1e0071f33c2"
+            };
+
+            const app = fb.initializeApp(firebaseConfig);
+            window._meuAcertoApp = app;
+
+            const dbInstance = fb.getFirestore(app);
+            setDb(dbInstance);
+
+            // Persistência offline (se der erro, só ignora)
+            fb.enableIndexedDbPersistence(dbInstance).catch(() => {});
+
+            const auth = fb.getAuth(app);
+            fb.onAuthStateChanged(auth, (user) => {
+              if (user) {
+                setAuthReady(true);
+              } else {
+                fb.signInAnonymously(auth).catch(console.error);
+              }
+            });
+
+            // Garante um login anônimo inicial
+            fb.signInAnonymously(auth).catch(() => {});
+          } else {
+            const app = window._meuAcertoApp;
+            const dbInstance = window.FirebaseLib.getFirestore(app);
+            setDb(dbInstance);
+            setAuthReady(true);
+          }
+        }, []);
+
+        const handleSelectUser = (u) => {
+          setPanelUser(u);
+          try {
+            localStorage.setItem('panelUser', u);
+          } catch {}
+        };
+
+        const handleLogout = () => {
+          setPanelUser(null);
+          try {
+            localStorage.removeItem('panelUser');
+          } catch {}
+        };
+
+        // Tela de carregamento enquanto Firebase/Auth não estão prontos
+        if (!authReady || !db) {
+          return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
+              <div className="w-10 h-10 border-4 border-slate-300 border-t-indigo-500 rounded-full animate-spin mb-4" />
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Carregando Meu Acerto...
+              </p>
+            </div>
+          );
+        }
+
+        // Se ainda não escolheu Guilherme / Thais
+        if (!panelUser) {
+          return <UserSelectionScreen onSelectUser={handleSelectUser} />;
+        }
+
+        // App principal
+        return (
+          <Dashboard 
+            user={panelUser} 
+            onLogout={handleLogout} 
+            db={db}
+          />
+        );
+      };
+
+      const root = createRoot(document.getElementById('root'));
+      root.render(<App />);
+
+      if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+          navigator.serviceWorker.register('sw.js').catch(() => {});
+      }
+    </script>
+  </body>
 </html>
