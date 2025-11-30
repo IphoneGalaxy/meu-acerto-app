@@ -711,46 +711,76 @@
         });  
       }, [visibleExpensesForScope, filterType]);  
   
-      // --- TOTAIS (Continuam usando expensesForScope Global) ---  
+      // --- TOTAIS (ATUALIZADO V2) ---  
       const { partG, partT, gPaid, tPaid } = useMemo(() => {  
         let pG = 0, pT = 0, paidG = 0, paidT = 0;  
+  
         for (const e of expensesForScope) {  
-            const val = Number(e.amount || 0);  
-            if (e.split === 'Dividido') { pG += val/2; pT += val/2; }  
-            else if (e.split === 'Guilherme') pG += val;  
-            else if (e.split === 'Thais') pT += val;  
-            if (e.type === 'Cartão') {  
-                const owner = ownerFromPaymentSource(e.paymentSource);  
-                if (owner === 'Guilherme') paidG += val;  
-                else if (owner === 'Thais') paidT += val;  
-                else if (owner === 'Ambos') { paidG += val/2; paidT += val/2; }  
-            } else {  
-                if (e.paidBy === 'Guilherme') paidG += val;  
-                else if (e.paidBy === 'Thais') paidT += val;  
-            }  
+          const val = Number(e.amount || 0);  
+  
+          // 🌎 PARTE JUSTA (quanto cada um "gastou" nesse lançamento)  
+          if (e.split === 'Dividido') {  
+            pG += val / 2;  
+            pT += val / 2;  
+          } else if (e.split === 'Guilherme') {  
+            pG += val;  
+          } else if (e.split === 'Thais') {  
+            pT += val;  
+          }  
+  
+          // 💸 QUEM PAGOU DE FATO  
+          if (e.type === 'Cartão') {  
+            // Regra da vida real: Guilherme paga 100% de TODAS as faturas  
+            paidG += val;  
+          } else {  
+            // Pix / Boleto / Ajuste usam o campo paidBy  
+            if (e.paidBy === 'Guilherme') paidG += val;  
+            else if (e.paidBy === 'Thais') paidT += val;  
+          }  
         }  
-        return { partG: round2(pG), partT: round2(pT), gPaid: round2(paidG), tPaid: round2(paidT) };  
+  
+        return {  
+          partG: round2(pG),  
+          partT: round2(pT),  
+          gPaid: round2(paidG),  
+          tPaid: round2(paidT),  
+        };  
       }, [expensesForScope]);  
   
       const difGastos = round2(partG - partT);  
       const valorDevolverSePagarTudo = user === 'Guilherme' ? round2(gPaid - partG) : round2(tPaid - partT);  
   
+      // --- SALDO DEVEDOR (AGORA RESPEITA O FILTRO scope) ---  
       const saldoDevedorThais = useMemo(() => {  
-         let pG=0, paidG=0;  
-         for (const e of expenses) {  
-            const val = Number(e.amount || 0);  
-            if (e.split === 'Dividido') pG += val/2;  
-            else if (e.split === 'Guilherme') pG += val;  
-            if (e.type === 'Cartão') {  
-                const owner = ownerFromPaymentSource(e.paymentSource);  
-                if (owner === 'Guilherme') paidG += val;  
-                else if (owner === 'Ambos') paidG += val/2;  
-            } else {  
-                if (e.paidBy === 'Guilherme') paidG += val;  
+        let pG = 0;    // parte justa do Guilherme dentro do escopo atual  
+        let paidG = 0; // quanto Guilherme realmente pagou dentro do escopo atual  
+  
+        for (const e of expensesForScope) {  
+          const val = Number(e.amount || 0);  
+  
+          // 🌎 PARTE JUSTA DO GUILHERME (em qualquer tipo)  
+          if (e.split === 'Dividido') {  
+            pG += val / 2;  
+          } else if (e.split === 'Guilherme') {  
+            pG += val;  
+          } // se split = Thais, parte do Gui é 0  
+  
+          // 💸 QUANTO O GUILHERME PAGOU MESMO  
+          if (e.type === "Cartão") {  
+            // Você paga 100% de todas as faturas (todos os cartões)  
+            paidG += val;  
+          } else {  
+            // Pix / Boleto / Ajuste  
+            if (e.paidBy === "Guilherme") {  
+              paidG += val;  
             }  
-         }  
-         return round2(paidG - pG);  
-      }, [expenses]);  
+          }  
+        }  
+  
+        // Se paidG > pG, Guilherme pagou mais do que devia -> Thais deve  
+        // Se paidG < pG, Thais pagou mais (ou Ajustes compensaram) -> saldo diminui  
+        return round2(paidG - pG);  
+      }, [expensesForScope]);  
   
       const cardTotals = useMemo(() => {  
         let tot=0, g=0, t=0, d=0;  
@@ -889,7 +919,7 @@
             description: fDesc,  
             amount: val,  
             date: fData,  
-            split: fTipo === 'Ajuste' ? 'Thais' : fSplit,  
+            split: fTipo === 'Ajuste' ? 'Guilherme' : fSplit,  
             type: fTipo,  
             paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,  
             paidBy: fTipo === 'Cartão' ? 'Cartão' : (fTipo === 'Ajuste' ? 'Thais' : user),  
@@ -1138,6 +1168,12 @@
          } catch(e) { console.error(e); }  
       };  
   
+      // Abas visíveis conforme o usuário  
+      const tabsForUser =  
+        user === 'Thais'  
+          ? ['Todos', 'Cartão', 'Pix', 'Boleto', 'Ajuste', 'Parcelado']  
+          : ['Todos', 'Cartão', 'Pix', 'Boleto', 'Parcelado'];  
+  
       /* ==== UI ==== */  
       return (  
         <div className="min-h-screen flex flex-col pb-12 bg-slate-50 dark:bg-slate-900">  
@@ -1184,7 +1220,9 @@
                     </div>  
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm relative overflow-hidden">  
                         <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-bl-full -mr-4 -mt-4"></div>  
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Saldo Geral (Thais → Gui)</p>  
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                          Saldo ({scope === 'geral' ? 'Geral' : scope === 'cartao' ? 'Cartão' : 'Pix / Boleto'}) (Thais → Gui)
+                        </p>  
                         <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{formatBRL(saldoDevedorThais)}</p>  
                         <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Total faturas: {formatBRL(cardTotals.grandTotal)}</p>  
                     </div>  
@@ -1292,8 +1330,18 @@
   
                 <div className="rounded-2xl overflow-hidden">  
                     <div className="flex gap-2 p-1 mb-2 overflow-x-auto">  
-                         {['Todos','Cartão','Pix','Boleto','Ajuste', 'Parcelado'].map(f => (  
-                             <button key={f} onClick={()=>setFilterType(f)} className={`px-3 py-1 rounded-full text-xs transition ${filterType===f ? theme.bg + ' text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>{f}</button>  
+                         {tabsForUser.map(f => (  
+                             <button  
+                               key={f}  
+                               onClick={() => setFilterType(f)}  
+                               className={`px-3 py-1 rounded-full text-xs transition ${  
+                                 filterType === f  
+                                   ? theme.bg + ' text-white'  
+                                   : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'  
+                               }`}  
+                             >  
+                               {f}  
+                             </button>  
                          ))}  
                     </div>  
                       
@@ -1456,58 +1504,100 @@
       );  
     };  
   
-    /* ========= Root ========= */  
-  
+    // ================== APP (Bootstrap Firebase + escolha de usuário) ==================  
     const App = () => {  
-      const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('meuAcertoUser') || 'null'));  
       const [db, setDb] = useState(null);  
-      const [ready, setReady] = useState(false);  
-        
-      const { initializeApp, getFirestore, getAuth, signInAnonymously, onAuthStateChanged, enableIndexedDbPersistence } = window.FirebaseLib;  
+      const [authReady, setAuthReady] = useState(false);  
+      const [panelUser, setPanelUser] = useState(() => {  
+        try {  
+          return localStorage.getItem('panelUser') || null;  
+        } catch {  
+          return null;  
+        }  
+      });  
   
       useEffect(() => {  
-        const firebaseConfig = {  
-          apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",  
-          authDomain: "meu-acerto-app.firebaseapp.com",  
-          projectId: "meu-acerto-app",  
-          storageBucket: "meu-acerto-app.appspot.com",  
-          messagingSenderId: "326844075367",  
-          appId: "1:326844075367:web:0315e86713b1e0071f33c2"  
-        };  
+        const fb = window.FirebaseLib;  
+        if (!fb) return;  
   
-        const app = initializeApp(firebaseConfig);  
-        const auth = getAuth(app);  
-        const firestore = getFirestore(app);  
+        // Evita inicializar o Firebase duas vezes  
+        if (!window._meuAcertoApp) {  
+          const firebaseConfig = {  
+            apiKey: "AIzaSyCeecZ8a4rPnf26IItU-HaaeRpcv5xPTkk",  
+            authDomain: "meu-acerto-app.firebaseapp.com",  
+            projectId: "meu-acerto-app",  
+            storageBucket: "meu-acerto-app.appspot.com",  
+            messagingSenderId: "326844075367",  
+            appId: "1:326844075367:web:0315e86713b1e0071f33c2"  
+          };  
   
-        enableIndexedDbPersistence(firestore).catch(err => {  
-             if (err.code == 'failed-precondition') console.warn('Persistência falhou: múltiplas abas abertas.');  
-             else if (err.code == 'unimplemented') console.warn('Persistência não suportada.');  
-        });  
+          const app = fb.initializeApp(firebaseConfig);  
+          window._meuAcertoApp = app;  
   
-        setDb(firestore);  
-        signInAnonymously(auth).catch(console.error);  
-        return onAuthStateChanged(auth, (u) => setReady(!!u));  
+          const dbInstance = fb.getFirestore(app);  
+          setDb(dbInstance);  
+  
+          // Persistência offline (se der erro, só ignora)  
+          fb.enableIndexedDbPersistence(dbInstance).catch(() => {});  
+  
+          const auth = fb.getAuth(app);  
+          fb.onAuthStateChanged(auth, (user) => {  
+            if (user) {  
+              setAuthReady(true);  
+            } else {  
+              fb.signInAnonymously(auth).catch(console.error);  
+            }  
+          });  
+  
+          // Garante um login anônimo inicial  
+          fb.signInAnonymously(auth).catch(() => {});  
+        } else {  
+          const app = window._meuAcertoApp;  
+          const dbInstance = window.FirebaseLib.getFirestore(app);  
+          setDb(dbInstance);  
+          setAuthReady(true);  
+        }  
       }, []);  
   
-      // TRIGGER DA MIGRAÇÃO  
-      useEffect(() => {  
-        if (!db || !ready) return;  
-          
-        // 1. Migra MonthKey  
-        if (localStorage.getItem('mkBackfillDone') !== '1') {  
-           backfillAllMonthKeys(db).catch(err => console.error('Backfill MonthKey:', err));  
-        }  
+      const handleSelectUser = (u) => {  
+        setPanelUser(u);  
+        try {  
+          localStorage.setItem('panelUser', u);  
+        } catch {}  
+      };  
   
-        // 2. Migra Split (Novo)  
-        if (localStorage.getItem('splitBackfillDone') !== '1') {  
-           backfillSplitFromPaidBy(db).catch(err => console.error('Backfill Split:', err));  
-        }  
-      }, [db, ready]);  
+      const handleLogout = () => {  
+        setPanelUser(null);  
+        try {  
+          localStorage.removeItem('panelUser');  
+        } catch {}  
+      };  
   
-      if (!ready) return <div className="min-h-screen flex items-center justify-center text-slate-400 animate-pulse">Carregando...</div>;  
-      if (!currentUser) return <UserSelectionScreen onSelectUser={(u)=>{setCurrentUser(u); localStorage.setItem('meuAcertoUser', JSON.stringify(u));}} />;  
-        
-      return <Dashboard user={currentUser} onLogout={()=>{setCurrentUser(null); localStorage.removeItem('meuAcertoUser');}} db={db} />;  
+      // Tela de carregamento enquanto Firebase/Auth não estão prontos  
+      if (!authReady || !db) {  
+        return (  
+          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">  
+            <div className="w-10 h-10 border-4 border-slate-300 border-t-indigo-500 rounded-full animate-spin mb-4" />  
+            <p className="text-sm text-slate-600 dark:text-slate-300">  
+              Carregando Meu Acerto...  
+            </p>  
+          </div>  
+        );  
+      }  
+  
+      // Se ainda não escolheu Guilherme / Thais  
+      if (!panelUser) {  
+        return <UserSelectionScreen onSelectUser={handleSelectUser} />;  
+      }  
+  
+      // App principal  
+      return (  
+        <Dashboard  
+          user={panelUser}  
+          onLogout={handleLogout}  
+          db={db}  
+        />  
+      );  
     };  
   
     const root = createRoot(document.getElementById('root'));  
