@@ -1068,7 +1068,7 @@
 
                   mapped.push({
                       description: desc,   
-                      amount: round2(Math.abs(amount)),
+                      amount: round2(amount), // REMOVIDO Math.abs() para respeitar negativos (estornos)
                       date: dateStr,   
                       type: 'Cartão',   
                       paymentSource: source,   
@@ -1640,3 +1640,5 @@
     </script>
   </body>
 </html>
+
+
