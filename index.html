@@ -910,7 +910,11 @@
               return;
           }
 
-          const mk = monthKeyFromPtDate(fData) || currentMonth;
+          // ------------------------------------------------------------------
+          // [ALTERADO] Prioriza o mês selecionado (currentMonth) em vez da data
+          // ------------------------------------------------------------------
+          const mk = currentMonth || monthKeyFromPtDate(fData) || currentMonthKey();
+          
           setSalvando(true);
 
           const expCol = collection(db, 'expenses');
