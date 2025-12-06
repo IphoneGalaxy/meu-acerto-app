@@ -20,11 +20,11 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- React -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" integrity="sha384-AISI5AuDG6E8DeEiFMVB3rGQxhZt24OU0avMp+GMV64+tpnA3+Z6F5MT0f96iPva" crossorigin="anonymous"></script>
     <!-- SheetJS -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
     <!-- Firebase Modular SDK -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
@@ -56,30 +56,6 @@
       const { useState, useEffect, useMemo, useRef } = React;
       const { createRoot } = ReactDOM;
 
-      /* ========= APP CONFIGURATION ========= */
-      const APP_CONFIG = {
-        users: {
-          primary: {
-            name: "Guilherme",
-            theme: "indigo", // tailwind color name
-            cardEnd: "2581",
-            digitalCardEnd: "7292" // Cartão digital associado
-          },
-          secondary: {
-            name: "Thais",
-            theme: "pink",
-            cardEnd: "1009",
-            digitalCardEnd: null
-          }
-        },
-        cards: {
-          // Mapeamento reverso útil para importação
-          "2581": "Guilherme",
-          "7292": "Guilherme", 
-          "1009": "Thais"
-        }
-      };
-
       /* ========= Styles Object ========= */
       const ui = {
         modal: "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl p-6 max-w-md w-full m-4",
@@ -106,28 +82,24 @@
 
       const canonicalSplit = (s) => {
         const n = norm(s);
-        if (n.includes(norm(APP_CONFIG.users.primary.name))) return APP_CONFIG.users.primary.name;
-        if (n.includes(norm(APP_CONFIG.users.secondary.name))) return APP_CONFIG.users.secondary.name;
+        if (n.includes('guilherme')) return 'Guilherme';
+        if (n.includes('thais')) return 'Thais';
         return 'Dividido';
       };
 
       const uiOwner = (e) => {
         const s = norm(e.split);
-        const pName = norm(APP_CONFIG.users.primary.name);
-        const sName = norm(APP_CONFIG.users.secondary.name);
-        
-        if (s === pName || s === sName) return s;
+        if (s === "guilherme" || s === "thais") return s;
         const who = norm(e.paidBy || e.owner || e.user || e.person || e.responsavel);
-        if (who === pName || who === sName) return who;
+        if (who === "guilherme" || who === "thais") return who;
         return "dividido";
       };
 
       const stripeBySplit = (e) => {
         const owner = uiOwner(e);
         const base = "before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-1.5 before:rounded-full";
-        // Nota: Cores fixas no CSS gerado pelo Tailwind precisam existir na config ou serem mapeadas
-        if (owner === norm(APP_CONFIG.users.primary.name)) return base + " before:bg-indigo-500";
-        if (owner === norm(APP_CONFIG.users.secondary.name)) return base + " before:bg-pink-500";
+        if (owner === "guilherme") return base + " before:bg-indigo-500";
+        if (owner === "thais")      return base + " before:bg-pink-500";
         return "";
       };
 
@@ -340,12 +312,9 @@
           if (m) return m[1];
           m = s.match(/(?:\*{2,}|x{3,}|xxxx)\s*(\d{4})\b/);
           if (m) return m[1];
-          
-          // Verifica cartões da config
-          if (new RegExp(`\\b${APP_CONFIG.users.primary.cardEnd}\\b`).test(s)) return APP_CONFIG.users.primary.cardEnd;
-          if (new RegExp(`\\b${APP_CONFIG.users.secondary.cardEnd}\\b`).test(s)) return APP_CONFIG.users.secondary.cardEnd;
-          if (APP_CONFIG.users.primary.digitalCardEnd && new RegExp(`\\b${APP_CONFIG.users.primary.digitalCardEnd}\\b`).test(s)) return APP_CONFIG.users.primary.digitalCardEnd;
-          
+          if (/\b2581\b/.test(s)) return '2581';
+          if (/\b1009\b/.test(s)) return '1009';
+          if (/\b7292\b/.test(s)) return '7292';
           m = s.match(/\b(?!20\d{2}\b)(\d{4})\b/);
           if (m) return m[1];
         }
@@ -424,20 +393,9 @@
       const ownerFromPaymentSource = (src) => {
         const s = norm(src);
         if (!s) return null;
-        
-        // Verifica Primary
-        if (s.includes(APP_CONFIG.users.primary.cardEnd) || s.includes(norm(APP_CONFIG.users.primary.name))) 
-            return APP_CONFIG.users.primary.name;
-            
-        // Verifica Secondary
-        if (s.includes(APP_CONFIG.users.secondary.cardEnd) || s.includes(norm(APP_CONFIG.users.secondary.name))) 
-            return APP_CONFIG.users.secondary.name;
-            
-        // Verifica Digital (Ambos/Misto ou Primary Digital) - Mantendo lógica original 'Ambos' se houver ambiguidade ou digital específico
-        if (APP_CONFIG.users.primary.digitalCardEnd && s.includes(APP_CONFIG.users.primary.digitalCardEnd)) 
-            return 'Ambos'; // Mantendo comportamento original 'Ambos' para o digital 7292, ou poderia ser Primary
-            
-        if (s.includes('digital')) return 'Ambos';
+        if (s.includes('2581') || s.includes('guilherme')) return 'Guilherme';
+        if (s.includes('1009') || s.includes('thais')) return 'Thais';
+        if (s.includes('7292') || s.includes('digital')) return 'Ambos';
         return null;
       };
 
@@ -527,12 +485,8 @@
             const d = doc.data() || {};
             const current = norm(d.split);
             const who = norm(d.paidBy || d.owner || d.user || d.person || d.responsavel);
-            
-            const pName = norm(APP_CONFIG.users.primary.name);
-            const sName = norm(APP_CONFIG.users.secondary.name);
-
-            if ((!current || current === "dividido") && (who === pName || who === sName)) {
-              const newSplit = who === pName ? APP_CONFIG.users.primary.name : APP_CONFIG.users.secondary.name;
+            if ((!current || current === "dividido") && (who === "guilherme" || who === "thais")) {
+              const newSplit = who === "guilherme" ? "Guilherme" : "Thais";
               batch.update(doc.ref, { split: newSplit });
               changed++;
             }
@@ -597,10 +551,10 @@
           <h1 className="text-4xl font-bold mb-2 text-slate-800 dark:text-white">Meu Acerto</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 mb-8">Quem está a usar?</p>
           <div className="space-y-4 w-full max-w-xs">
-            {[APP_CONFIG.users.primary.name, APP_CONFIG.users.secondary.name].map(u => (
+            {['Guilherme', 'Thais'].map(u => (
               <button key={u} onClick={() => onSelectUser(u)}
                 className={`w-full py-3 rounded-xl text-white font-semibold shadow-lg hover:brightness-110 transition-all hover:scale-105  
-                ${u === APP_CONFIG.users.secondary.name ? 'bg-pink-600' : 'bg-indigo-600'}`}>
+                ${u === 'Thais' ? 'bg-pink-600' : 'bg-indigo-600'}`}>
                 {u}
               </button>
             ))}
@@ -651,14 +605,7 @@
         const [fData, setFData] = useState(() => new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
         const [fTipo, setFTipo] = useState('Cartão');
         const [fSplit, setFSplit] = useState('Dividido');
-        
-        const getCardLabel = (name, end) => `Cartão ${name} (final ${end})`;
-        
-        const [fFonte, setFFonte] = useState(
-            user === APP_CONFIG.users.primary.name 
-            ? getCardLabel(APP_CONFIG.users.primary.name, APP_CONFIG.users.primary.cardEnd) 
-            : getCardLabel(APP_CONFIG.users.secondary.name, APP_CONFIG.users.secondary.cardEnd)
-        );
+        const [fFonte, setFFonte] = useState(user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)');
         const [fParcela, setFParcela] = useState('');
         const [salvando, setSalvando] = useState(false);
         const [editingId, setEditingId] = useState(null);
@@ -668,7 +615,7 @@
 
         const { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, runTransaction, writeBatch, query, where } = fb;
 
-        const theme = user === APP_CONFIG.users.secondary.name   
+        const theme = user === 'Thais'   
           ? { text:'text-pink-600 dark:text-pink-400', bg:'bg-pink-600', hover:'hover:bg-pink-700' }
           : { text:'text-indigo-600 dark:text-indigo-400', bg:'bg-indigo-600', hover:'hover:bg-indigo-700' };
 
@@ -795,20 +742,20 @@
             if (e.split === 'Dividido') {
               pG += val / 2;
               pT += val / 2;
-            } else if (e.split === APP_CONFIG.users.primary.name) {
+            } else if (e.split === 'Guilherme') {
               pG += val;
-            } else if (e.split === APP_CONFIG.users.secondary.name) {
+            } else if (e.split === 'Thais') {
               pT += val;
             }
 
             // 💸 QUEM PAGOU DE FATO
             if (e.type === 'Cartão') {
-              // Regra da vida real: Primary paga 100% de TODAS as faturas
+              // Regra da vida real: Guilherme paga 100% de TODAS as faturas
               paidG += val;
             } else {
               // Pix / Boleto / Ajuste usam o campo paidBy
-              if (e.paidBy === APP_CONFIG.users.primary.name) paidG += val;
-              else if (e.paidBy === APP_CONFIG.users.secondary.name) paidT += val;
+              if (e.paidBy === 'Guilherme') paidG += val;
+              else if (e.paidBy === 'Thais') paidT += val;
             }
           }
 
@@ -821,30 +768,30 @@
         }, [expensesForScope]);
 
         const difGastos = round2(partG - partT);
-        const valorDevolverSePagarTudo = user === APP_CONFIG.users.primary.name ? round2(gPaid - partG) : round2(tPaid - partT);
+        const valorDevolverSePagarTudo = user === 'Guilherme' ? round2(gPaid - partG) : round2(tPaid - partT);
 
         // --- SALDO DEVEDOR (AGORA RESPEITA O FILTRO scope) ---
         const saldoDevedorThais = useMemo(() => {
-          let pG = 0;    // parte justa do Primary dentro do escopo atual
-          let paidG = 0; // quanto Primary realmente pagou dentro do escopo atual
+          let pG = 0;    // parte justa do Guilherme dentro do escopo atual
+          let paidG = 0; // quanto Guilherme realmente pagou dentro do escopo atual
 
           for (const e of expensesForScope) {
             const val = Number(e.amount || 0);
 
-            // 🌎 PARTE JUSTA DO PRIMARY (em qualquer tipo)
+            // 🌎 PARTE JUSTA DO GUILHERME (em qualquer tipo)
             if (e.split === 'Dividido') {
               pG += val / 2;
-            } else if (e.split === APP_CONFIG.users.primary.name) {
+            } else if (e.split === 'Guilherme') {
               pG += val;
-            } // se split = Secondary, parte do Gui é 0
+            } // se split = Thais, parte do Gui é 0
 
-            // 💸 QUANTO O PRIMARY PAGOU MESMO
+            // 💸 QUANTO O GUILHERME PAGOU MESMO
             if (e.type === "Cartão") {
               // Você paga 100% de todas as faturas (todos os cartões)
               paidG += val;
             } else {
               // Pix / Boleto / Ajuste
-              if (e.paidBy === APP_CONFIG.users.primary.name) {
+              if (e.paidBy === "Guilherme") {
                 paidG += val;
               }
             }
@@ -862,8 +809,8 @@
               const val = Number(e.amount||0);
               tot+=val;
               const o = ownerFromPaymentSource(e.paymentSource);
-              if (o === APP_CONFIG.users.primary.name) g+=val;
-              else if (o === APP_CONFIG.users.secondary.name) t+=val;
+              if (o === 'Guilherme') g+=val;
+              else if (o === 'Thais') t+=val;
               else if (o === 'Ambos') d+=val;
           }
           return { grandTotal: round2(tot), gCard: round2(g), tCard: round2(t), dCard: round2(d) };
@@ -900,9 +847,9 @@
             // Que parte é do Gui e da Thais
             if (e.type === "Cartão") {
               const owner = ownerFromPaymentSource(e.paymentSource);
-              if (owner === APP_CONFIG.users.primary.name) {
+              if (owner === "Guilherme") {
                 totalG += val;
-              } else if (owner === APP_CONFIG.users.secondary.name) {
+              } else if (owner === "Thais") {
                 totalT += val;
               } else if (owner === "Ambos") {
                 totalG += val / 2;
@@ -910,8 +857,8 @@
               }
             } else {
               // Parcelados em Pix/Boleto (se algum dia aparecer)
-              if (e.paidBy === APP_CONFIG.users.primary.name) totalG += val;
-              else if (e.paidBy === APP_CONFIG.users.secondary.name) totalT += val;
+              if (e.paidBy === "Guilherme") totalG += val;
+              else if (e.paidBy === "Thais") totalT += val;
             }
           }
 
@@ -977,14 +924,14 @@
 
           if (fTipo === 'Cartão') {
               const s = norm(fFonte);
-              if (s.includes(APP_CONFIG.users.secondary.cardEnd)) {
-                  panelUser = APP_CONFIG.users.secondary.name;
-              } else if (s.includes(APP_CONFIG.users.primary.cardEnd) || (APP_CONFIG.users.primary.digitalCardEnd && s.includes(APP_CONFIG.users.primary.digitalCardEnd))) {
-                  panelUser = APP_CONFIG.users.primary.name; // cartão Guilherme + digital ficam no painel do Gui
+              if (s.includes('1009')) {
+                  panelUser = 'Thais';
+              } else if (s.includes('2581') || s.includes('7292')) {
+                  panelUser = 'Guilherme'; // cartão Guilherme + digital ficam no painel do Gui
               }
           } else {
               // Pix / Boleto / Ajuste: fica no painel de quem está usando
-              if (user === APP_CONFIG.users.primary.name || user === APP_CONFIG.users.secondary.name) {
+              if (user === 'Guilherme' || user === 'Thais') {
                   panelUser = user;
               }
           }
@@ -996,10 +943,10 @@
               description: fDesc,
               amount: val,
               date: fData,
-              split: fTipo === 'Ajuste' ? user : fSplit,
+              split: fTipo === 'Ajuste' ? 'Guilherme' : fSplit,
               type: fTipo,
               paymentSource: fTipo === 'Cartão' ? fFonte : fTipo,
-              paidBy: fTipo === 'Cartão' ? 'Cartão' : (fTipo === 'Ajuste' ? (user === APP_CONFIG.users.primary.name ? APP_CONFIG.users.secondary.name : APP_CONFIG.users.primary.name) : user),
+              paidBy: fTipo === 'Cartão' ? 'Cartão' : (fTipo === 'Ajuste' ? 'Thais' : user),
               monthKey: mk,
               parcela: instObj.isInstallment ? instObj.info : null,
               isInstallment: instObj.isInstallment,
@@ -1043,11 +990,7 @@
             setFData(e.date || new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
             setFTipo(e.type || 'Cartão');
             setFSplit(e.split || 'Dividido');
-            setFFonte(e.paymentSource || (
-                user === APP_CONFIG.users.primary.name 
-                ? getCardLabel(APP_CONFIG.users.primary.name, APP_CONFIG.users.primary.cardEnd)
-                : getCardLabel(APP_CONFIG.users.secondary.name, APP_CONFIG.users.secondary.cardEnd)
-            ));
+            setFFonte(e.paymentSource || (user === 'Guilherme' ? 'Cartão Guilherme (final 2581)' : 'Cartão Thais (final 1009)'));
             setFParcela(e.parcela || '');
             setIsAddOpen(true);
         };
@@ -1114,19 +1057,17 @@
 
                   const last4 = last4FromRow(row);
                   let source = 'Cartão';
-                  
-                  if (last4 === APP_CONFIG.users.primary.cardEnd) source = `Cartão ${APP_CONFIG.users.primary.name} (final ${last4})`;
-                  else if (last4 === APP_CONFIG.users.secondary.cardEnd) source = `Cartão ${APP_CONFIG.users.secondary.name} (final ${last4})`;
-                  else if (APP_CONFIG.users.primary.digitalCardEnd && last4 === APP_CONFIG.users.primary.digitalCardEnd) source = `Cartão Digital (final ${last4})`;
+                  if (last4 === "2581") source = "Cartão Guilherme (final 2581)";
+                  else if (last4 === "1009") source = "Cartão Thais (final 1009)";
+                  else if (last4 === "7292") source = "Cartão Digital (final 7292)";
 
                   // 🔹 De quem é esse lançamento no painel?
-                  let panelUser = APP_CONFIG.users.primary.name; // padrão
+                  let panelUser = 'Guilherme'; // padrão
                   const sSrc = norm(source);
-                  
-                  if (sSrc.includes(APP_CONFIG.users.secondary.cardEnd)) {
-                      panelUser = APP_CONFIG.users.secondary.name;
-                  } else if (sSrc.includes(APP_CONFIG.users.primary.cardEnd) || (APP_CONFIG.users.primary.digitalCardEnd && sSrc.includes(APP_CONFIG.users.primary.digitalCardEnd))) {
-                      panelUser = APP_CONFIG.users.primary.name;
+                  if (sSrc.includes('1009')) {
+                      panelUser = 'Thais';
+                  } else if (sSrc.includes('2581') || sSrc.includes('7292')) {
+                      panelUser = 'Guilherme';
                   }
 
                   mapped.push({
@@ -1253,7 +1194,7 @@
 
         // Abas visíveis conforme o usuário
         const tabsForUser =
-          user === APP_CONFIG.users.secondary.name
+          user === 'Thais'
             ? ['Todos', 'Cartão', 'Pix', 'Boleto', 'Ajuste', 'Parcelado']
             : ['Todos', 'Cartão', 'Pix', 'Boleto', 'Parcelado'];
 
@@ -1302,20 +1243,20 @@
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
                           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Divisão ({scope})</p>
-                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">{APP_CONFIG.users.primary.name}</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partG)}</span></div>
-                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">{APP_CONFIG.users.secondary.name}</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partT)}</span></div>
+                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partG)}</span></div>
+                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-slate-900 dark:text-slate-100">{formatBRL(partT)}</span></div>
                           <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500 dark:text-slate-400"><span>Diferença</span><span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(difGastos)}</span></div>
                       </div>
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm">
                           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Pagamentos ({scope})</p>
-                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">{APP_CONFIG.users.primary.name}</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(gPaid)}</span></div>
-                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">{APP_CONFIG.users.secondary.name}</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(tPaid)}</span></div>
+                          <div className="flex justify-between items-end mb-1"><span className="text-sm text-slate-700 dark:text-slate-200">Guilherme</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(gPaid)}</span></div>
+                          <div className="flex justify-between items-end"><span className="text-sm text-slate-700 dark:text-slate-200">Thais</span><span className="font-bold text-emerald-600 dark:text-emerald-400">{formatBRL(tPaid)}</span></div>
                           <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">Se {user} quitar tudo: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatBRL(valorDevolverSePagarTudo)}</span></div>
                       </div>
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm relative overflow-hidden">
                           <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-bl-full -mr-4 -mt-4"></div>
                           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                            Saldo ({scope === 'geral' ? 'Geral' : scope === 'cartao' ? 'Cartão' : 'Pix / Boleto'}) ({APP_CONFIG.users.secondary.name} → {APP_CONFIG.users.primary.name.slice(0,3)})
+                            Saldo ({scope === 'geral' ? 'Geral' : scope === 'cartao' ? 'Cartão' : 'Pix / Boleto'}) (Thais → Gui)
                           </p>
                           <p className={`text-2xl font-extrabold ${saldoDevedorThais > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{formatBRL(saldoDevedorThais)}</p>
                           <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Total faturas: {formatBRL(cardTotals.grandTotal)}</p>
@@ -1340,7 +1281,7 @@
                       <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-1 text-xs">
                       <div className="flex justify-between">
                           <span className="text-slate-600 dark:text-slate-300"> 
-                          Cartão {APP_CONFIG.users.secondary.name} (final {APP_CONFIG.users.secondary.cardEnd})
+                          Cartão Thais (final 1009)
                           </span>
                           <span className="font-semibold text-slate-900 dark:text-slate-100"> 
                           {formatBRL(cardTotals.tCard)}
@@ -1349,23 +1290,21 @@
 
                       <div className="flex justify-between">
                           <span className="text-slate-600 dark:text-slate-300"> 
-                          Cartão {APP_CONFIG.users.primary.name} (final {APP_CONFIG.users.primary.cardEnd})
+                          Cartão Guilherme (final 2581)
                           </span>
                           <span className="font-semibold text-slate-900 dark:text-slate-100"> 
                           {formatBRL(cardTotals.gCard)}
                           </span>
                       </div>
 
-                      {APP_CONFIG.users.primary.digitalCardEnd && (
-                        <div className="flex justify-between">
-                            <span className="text-slate-600 dark:text-slate-300"> 
-                            Cartão Digital (final {APP_CONFIG.users.primary.digitalCardEnd})
-                            </span>
-                            <span className="font-semibold text-slate-900 dark:text-slate-100"> 
-                            {formatBRL(cardTotals.dCard)}
-                            </span>
-                        </div>
-                      )}
+                      <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-300"> 
+                          Cartão Digital (final 7292)
+                          </span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100"> 
+                          {formatBRL(cardTotals.dCard)}
+                          </span>
+                      </div>
                       </div>
                   </div>
 
@@ -1394,7 +1333,7 @@
                         Sua parte:{" "} 
                         <span className="font-semibold"> 
                           {formatBRL(
-                            user === APP_CONFIG.users.primary.name 
+                            user === "Guilherme" 
                               ? freedNextInvoice.totalG 
                               : freedNextInvoice.totalT
                           )}
@@ -1412,9 +1351,9 @@
                           setFTipo('Cartão');
                           setFSplit('Dividido');
                           setFFonte(
-                              user === APP_CONFIG.users.primary.name
-                              ? getCardLabel(APP_CONFIG.users.primary.name, APP_CONFIG.users.primary.cardEnd)
-                              : getCardLabel(APP_CONFIG.users.secondary.name, APP_CONFIG.users.secondary.cardEnd)
+                              user === 'Guilherme'
+                              ? 'Cartão Guilherme (final 2581)'
+                              : 'Cartão Thais (final 1009)'
                           );
                           setFData(new Date().toLocaleDateString('pt-PT', { timeZone: 'UTC' }));
                           setIsAddOpen(true);
@@ -1531,13 +1470,13 @@
                       <div>
                           <label className={ui.label}>Tipo</label>
                           <select className={ui.select} value={fTipo} onChange={e=>setFTipo(e.target.value)}>
-                              <option>Cartão</option><option>Pix</option><option>Boleto</option><option disabled={user!==APP_CONFIG.users.secondary.name}>Ajuste</option>
+                              <option>Cartão</option><option>Pix</option><option>Boleto</option><option disabled={user!=='Thais'}>Ajuste</option>
                           </select>
                       </div>
                       <div>
                           <label className={ui.label}>Divisão</label>
                           <select className={ui.select} value={fSplit} onChange={e=>setFSplit(e.target.value)} disabled={fTipo==='Ajuste'}>
-                              <option>Dividido</option><option>{APP_CONFIG.users.primary.name}</option><option>{APP_CONFIG.users.secondary.name}</option>
+                              <option>Dividido</option><option>Guilherme</option><option>Thais</option>
                           </select>
                       </div>
                   </div>
@@ -1545,9 +1484,9 @@
                       <label className={ui.label}>Cartão / Origem</label>
                       {fTipo==='Cartão' ? (
                           <select className={ui.select} value={fFonte} onChange={e=>setFFonte(e.target.value)}>
-                              <option>{getCardLabel(APP_CONFIG.users.primary.name, APP_CONFIG.users.primary.cardEnd)}</option>
-                              <option>{getCardLabel(APP_CONFIG.users.secondary.name, APP_CONFIG.users.secondary.cardEnd)}</option>
-                              {APP_CONFIG.users.primary.digitalCardEnd && <option>Cartão Digital (final {APP_CONFIG.users.primary.digitalCardEnd})</option>}
+                              <option>Cartão Guilherme (final 2581)</option>
+                              <option>Cartão Thais (final 1009)</option>
+                              <option>Cartão Digital (final 7292)</option>
                           </select>
                       ) : (
                           <input className={ui.input} value={fTipo} disabled />
@@ -1705,5 +1644,4 @@
     </script>
   </body>
 </html>
-
 
