@@ -535,6 +535,40 @@
       };
 
       /* ========= Components ========= */
+      const ToastContext = React.createContext();
+
+      const ToastProvider = ({ children }) => {
+        const [toasts, setToasts] = useState([]);
+
+        const addToast = (message, type = 'info') => {
+          const id = Date.now();
+          setToasts(prev => [...prev, { id, message, type }]);
+          setTimeout(() => removeToast(id), 3000);
+        };
+
+        const removeToast = (id) => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        };
+
+        return (
+          <ToastContext.Provider value={{ addToast }}>
+            {children}
+            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-full max-w-sm px-4">
+              {toasts.map(t => (
+                <div key={t.id} 
+                  className={`p-4 rounded-xl shadow-lg text-white text-sm font-medium flex items-center justify-between animate-[fadeIn_0.3s_ease-out]
+                  ${t.type === 'error' ? 'bg-red-500' : t.type === 'success' ? 'bg-emerald-500' : 'bg-slate-800'}`}>
+                  <span>{t.message}</span>
+                  <button onClick={() => removeToast(t.id)} className="ml-4 opacity-80 hover:opacity-100">✕</button>
+                </div>
+              ))}
+            </div>
+          </ToastContext.Provider>
+        );
+      };
+
+      const useToast = () => React.useContext(ToastContext);
+
       const Modal = ({ isOpen, onClose, children }) => {
         if (!isOpen) return null;
         return (
@@ -609,6 +643,8 @@
         const [fParcela, setFParcela] = useState('');
         const [salvando, setSalvando] = useState(false);
         const [editingId, setEditingId] = useState(null);
+        
+        const { addToast } = useToast();
 
         const fb = window.FirebaseLib;
         if (!fb) return null; // Safety check for render
@@ -906,7 +942,7 @@
 
           // Validação básica
           if (!fDesc || !Number.isFinite(val)) {
-              console.warn('Dados inválidos ao salvar lançamento');
+              addToast('Preencha a descrição e um valor válido.', 'error');
               return;
           }
 
@@ -974,8 +1010,10 @@
 
               // Limpa e fecha modal
               closeAddModal();
+              addToast(editingId ? 'Lançamento atualizado!' : 'Lançamento salvo com sucesso!', 'success');
           } catch (e) {
               console.error('Erro ao salvar lançamento:', e);
+              addToast('Erro ao salvar. Tente novamente.', 'error');
           }
 
           setSalvando(false);
@@ -1096,7 +1134,11 @@
 
               setImportedExpenses(mapped);
               setIsImportOpen(true);
-          } catch(err) { console.error(err); }
+              addToast(`${mapped.length} itens encontrados na planilha.`, 'info');
+          } catch(err) { 
+            console.error(err);
+            addToast('Erro ao ler arquivo. Verifique o formato.', 'error');
+          }
           setIsImporting(false);
           if (fileInputRef.current) fileInputRef.current.value = '';
         };
@@ -1139,6 +1181,7 @@
           setIsImportOpen(false);
           setImportedExpenses([]);
           setIsImporting(false);
+          addToast(`${count} novos lançamentos importados!`, 'success');
         };
 
         const doDelete = async () => {
@@ -1160,7 +1203,11 @@
                } else { await deleteDoc(expRef); }
                setDelTarget(null);
                setDelOpen(false);
-          } catch(e) { console.error(e); }
+               addToast('Lançamento excluído.', 'success');
+          } catch(e) { 
+            console.error(e);
+            addToast('Erro ao excluir.', 'error');
+          }
           setDeleting(false);
         };
 
@@ -1178,7 +1225,11 @@
               snap.forEach(d => batch.delete(d.ref));
               await batch.commit();
               setIsClearOpen(false);
-          } catch(e) { console.error(e); }
+              addToast(`Mês ${monthLabel(currentMonth)} limpo com sucesso.`, 'success');
+          } catch(e) { 
+            console.error(e);
+            addToast('Erro ao limpar mês.', 'error');
+          }
         };
 
         const clearAll = async () => {
@@ -1189,7 +1240,11 @@
                snap.forEach(d => batch.delete(d.ref));
                await batch.commit();
                setIsClearOpen(false);
-           } catch(e) { console.error(e); }
+               addToast('Todos os dados foram apagados.', 'success');
+           } catch(e) { 
+             console.error(e);
+             addToast('Erro ao apagar tudo.', 'error');
+           }
         };
 
         // Abas visíveis conforme o usuário
@@ -1627,11 +1682,13 @@
 
         // App principal
         return (
-          <Dashboard 
-            user={panelUser} 
-            onLogout={handleLogout} 
-            db={db}
-          />
+          <ToastProvider>
+            <Dashboard 
+              user={panelUser} 
+              onLogout={handleLogout} 
+              db={db}
+            />
+          </ToastProvider>
         );
       };
 
