@@ -20,11 +20,11 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- React -->
-    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" integrity="sha384-AISI5AuDG6E8DeEiFMVB3rGQxhZt24OU0avMp+GMV64+tpnA3+Z6F5MT0f96iPva" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
     <!-- SheetJS -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- Firebase Modular SDK -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
@@ -535,40 +535,6 @@
       };
 
       /* ========= Components ========= */
-      const ToastContext = React.createContext();
-
-      const ToastProvider = ({ children }) => {
-        const [toasts, setToasts] = useState([]);
-
-        const addToast = (message, type = 'info') => {
-          const id = Date.now();
-          setToasts(prev => [...prev, { id, message, type }]);
-          setTimeout(() => removeToast(id), 3000);
-        };
-
-        const removeToast = (id) => {
-          setToasts(prev => prev.filter(t => t.id !== id));
-        };
-
-        return (
-          <ToastContext.Provider value={{ addToast }}>
-            {children}
-            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-full max-w-sm px-4">
-              {toasts.map(t => (
-                <div key={t.id} 
-                  className={`p-4 rounded-xl shadow-lg text-white text-sm font-medium flex items-center justify-between animate-[fadeIn_0.3s_ease-out]
-                  ${t.type === 'error' ? 'bg-red-500' : t.type === 'success' ? 'bg-emerald-500' : 'bg-slate-800'}`}>
-                  <span>{t.message}</span>
-                  <button onClick={() => removeToast(t.id)} className="ml-4 opacity-80 hover:opacity-100">✕</button>
-                </div>
-              ))}
-            </div>
-          </ToastContext.Provider>
-        );
-      };
-
-      const useToast = () => React.useContext(ToastContext);
-
       const Modal = ({ isOpen, onClose, children }) => {
         if (!isOpen) return null;
         return (
@@ -643,8 +609,6 @@
         const [fParcela, setFParcela] = useState('');
         const [salvando, setSalvando] = useState(false);
         const [editingId, setEditingId] = useState(null);
-        
-        const { addToast } = useToast();
 
         const fb = window.FirebaseLib;
         if (!fb) return null; // Safety check for render
@@ -942,7 +906,7 @@
 
           // Validação básica
           if (!fDesc || !Number.isFinite(val)) {
-              addToast('Preencha a descrição e um valor válido.', 'error');
+              console.warn('Dados inválidos ao salvar lançamento');
               return;
           }
 
@@ -1010,10 +974,8 @@
 
               // Limpa e fecha modal
               closeAddModal();
-              addToast(editingId ? 'Lançamento atualizado!' : 'Lançamento salvo com sucesso!', 'success');
           } catch (e) {
               console.error('Erro ao salvar lançamento:', e);
-              addToast('Erro ao salvar. Tente novamente.', 'error');
           }
 
           setSalvando(false);
@@ -1134,11 +1096,7 @@
 
               setImportedExpenses(mapped);
               setIsImportOpen(true);
-              addToast(`${mapped.length} itens encontrados na planilha.`, 'info');
-          } catch(err) { 
-            console.error(err);
-            addToast('Erro ao ler arquivo. Verifique o formato.', 'error');
-          }
+          } catch(err) { console.error(err); }
           setIsImporting(false);
           if (fileInputRef.current) fileInputRef.current.value = '';
         };
@@ -1181,7 +1139,6 @@
           setIsImportOpen(false);
           setImportedExpenses([]);
           setIsImporting(false);
-          addToast(`${count} novos lançamentos importados!`, 'success');
         };
 
         const doDelete = async () => {
@@ -1203,11 +1160,7 @@
                } else { await deleteDoc(expRef); }
                setDelTarget(null);
                setDelOpen(false);
-               addToast('Lançamento excluído.', 'success');
-          } catch(e) { 
-            console.error(e);
-            addToast('Erro ao excluir.', 'error');
-          }
+          } catch(e) { console.error(e); }
           setDeleting(false);
         };
 
@@ -1225,11 +1178,7 @@
               snap.forEach(d => batch.delete(d.ref));
               await batch.commit();
               setIsClearOpen(false);
-              addToast(`Mês ${monthLabel(currentMonth)} limpo com sucesso.`, 'success');
-          } catch(e) { 
-            console.error(e);
-            addToast('Erro ao limpar mês.', 'error');
-          }
+          } catch(e) { console.error(e); }
         };
 
         const clearAll = async () => {
@@ -1240,11 +1189,7 @@
                snap.forEach(d => batch.delete(d.ref));
                await batch.commit();
                setIsClearOpen(false);
-               addToast('Todos os dados foram apagados.', 'success');
-           } catch(e) { 
-             console.error(e);
-             addToast('Erro ao apagar tudo.', 'error');
-           }
+           } catch(e) { console.error(e); }
         };
 
         // Abas visíveis conforme o usuário
@@ -1682,13 +1627,11 @@
 
         // App principal
         return (
-          <ToastProvider>
-            <Dashboard 
-              user={panelUser} 
-              onLogout={handleLogout} 
-              db={db}
-            />
-          </ToastProvider>
+          <Dashboard 
+            user={panelUser} 
+            onLogout={handleLogout} 
+            db={db}
+          />
         );
       };
 
