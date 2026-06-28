@@ -22,27 +22,29 @@
     <!-- React -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-    <!-- Firebase Modular SDK — precisa vir ANTES do Babel para não ser capturado pelo MutationObserver -->
-    <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
-      import { 
-        getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
-        onSnapshot, runTransaction, writeBatch, query, where, getDocs, 
-        enableIndexedDbPersistence, orderBy, limit, startAfter, documentId 
-      } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
-      import { 
-        getAuth, signInAnonymously, onAuthStateChanged 
-      } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+    <!-- Firebase via import() dinâmico — evita o Babel processar import estático -->
+    <script>
+      (async function(){
+        try {
+          const [{ initializeApp }, { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField, onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence, orderBy, limit, startAfter, documentId }, { getAuth, signInAnonymously, onAuthStateChanged }] = await Promise.all([
+            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"),
+            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js"),
+            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js")
+          ]);
 
-      window.FirebaseLib = {
-        initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
-        onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,
-        orderBy, limit, startAfter, documentId,
-        getAuth, signInAnonymously, onAuthStateChanged
-      };
+          window.FirebaseLib = {
+            initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
+            onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,
+            orderBy, limit, startAfter, documentId,
+            getAuth, signInAnonymously, onAuthStateChanged
+          };
 
-      // Notifica que o Firebase está pronto — o App React/Babel aguarda este evento
-      window.dispatchEvent(new Event("firebase-lib-ready"));
+          window.dispatchEvent(new Event("firebase-lib-ready"));
+        } catch (e) {
+          console.error('[Meu Acerto] Erro ao carregar Firebase:', e);
+          window._firebaseLoadError = e.message || 'Falha ao importar Firebase';
+        }
+      })();
     </script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
     <!-- SheetJS -->
