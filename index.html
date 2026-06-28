@@ -22,28 +22,56 @@
     <!-- React -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-    <!-- Firebase via import() dinâmico — evita o Babel processar import estático -->
+    <!-- Firebase via CDN Compat (sem import modular — evita conflito com Babel Standalone) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
     <script>
-      (async function(){
-        try {
-          const [{ initializeApp }, { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField, onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence, orderBy, limit, startAfter, documentId }, { getAuth, signInAnonymously, onAuthStateChanged }] = await Promise.all([
-            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"),
-            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js"),
-            import("https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js")
-          ]);
+      (function(){
+        var fb = firebase;
+        var fs = fb.firestore;
 
-          window.FirebaseLib = {
-            initializeApp, getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
-            onSnapshot, runTransaction, writeBatch, query, where, getDocs, enableIndexedDbPersistence,
-            orderBy, limit, startAfter, documentId,
-            getAuth, signInAnonymously, onAuthStateChanged
-          };
+        function _c(type, args) { return { _t: type, _a: args }; }
 
-          window.dispatchEvent(new Event("firebase-lib-ready"));
-        } catch (e) {
-          console.error('[Meu Acerto] Erro ao carregar Firebase:', e);
-          window._firebaseLoadError = e.message || 'Falha ao importar Firebase';
-        }
+        window.FirebaseLib = {
+          initializeApp: function(cfg) { return fb.initializeApp(cfg); },
+          getFirestore: function(app) { return fs(app); },
+
+          collection: function(db, path) { return db.collection(path); },
+          doc: function(db, colPath, docId) { return db.collection(colPath).doc(docId); },
+
+          where: function(f, op, v) { return _c('where', [f, op, v]); },
+          orderBy: function(f, dir) { return _c('orderBy', [f, dir]); },
+          limit: function(n) { return _c('limit', [n]); },
+          startAfter: function(v) { return _c('startAfter', [v]); },
+          documentId: function() { return fs.FieldPath.documentId(); },
+
+          query: function(ref) {
+            var q = ref;
+            for (var i = 1; i < arguments.length; i++) {
+              var c = arguments[i];
+              q = q[c._t].apply(q, c._a);
+            }
+            return q;
+          },
+
+          getDocs: function(q) { return q.get(); },
+          addDoc: function(ref, data) { return ref.add(data); },
+          updateDoc: function(ref, data) { return ref.update(data); },
+          deleteDoc: function(ref) { return ref.delete(); },
+          deleteField: function() { return fs.FieldValue.delete(); },
+          onSnapshot: function(ref, cb) { return ref.onSnapshot(cb); },
+
+          writeBatch: function(db) { return db.batch(); },
+          runTransaction: function(db, fn) { return db.runTransaction(fn); },
+          enableIndexedDbPersistence: function(db) { return db.enablePersistence(); },
+
+          getAuth: function(app) { return fb.auth(app); },
+          signInAnonymously: function(auth) { return auth.signInAnonymously(); },
+          onAuthStateChanged: function(auth, cb) { return auth.onAuthStateChanged(cb); }
+        };
+
+        window.dispatchEvent(new Event("firebase-lib-ready"));
       })();
     </script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
