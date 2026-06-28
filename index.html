@@ -22,10 +22,7 @@
     <!-- React -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
-    <!-- SheetJS -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <!-- Firebase Modular SDK — apenas importa e expõe via window.FirebaseLib -->
+    <!-- Firebase Modular SDK — precisa vir ANTES do Babel para não ser capturado pelo MutationObserver -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
       import { 
@@ -47,6 +44,9 @@
       // Notifica que o Firebase está pronto — o App React/Babel aguarda este evento
       window.dispatchEvent(new Event("firebase-lib-ready"));
     </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+    <!-- SheetJS -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
       body { font-family: 'Inter', sans-serif; }
       .modal-enter { animation: fadeIn .2s ease-out; }
