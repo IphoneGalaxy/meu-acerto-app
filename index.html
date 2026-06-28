@@ -1794,7 +1794,7 @@
       (function(){
         var code = document.getElementById('app-code').textContent;
         try {
-          var result = Babel.transform(code, { presets: ['react'] });
+          var result = Babel.transform(code, { presets: [['react', { runtime: 'classic' }]], sourceType: 'script' });
           var s = document.createElement('script');
           s.textContent = result.code;
           document.body.appendChild(s);
