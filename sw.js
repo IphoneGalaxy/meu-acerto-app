@@ -6,7 +6,7 @@ function repoBasePath() {
 }
 
 const BASE = repoBasePath();
-const CACHE = `meu-acerto-v7${BASE.replace(/\//g, '-')}`;
+const CACHE = `meu-acerto-v8${BASE.replace(/\//g, '-')}`;
 
 const APP_SHELL = [
   `${BASE}/`,

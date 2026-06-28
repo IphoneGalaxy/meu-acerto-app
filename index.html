@@ -25,7 +25,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
     <!-- SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <!-- Firebase Modular SDK -->
+    <!-- Firebase Modular SDK — apenas importa e expõe via window.FirebaseLib -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
       import { 
@@ -43,6 +43,9 @@
         orderBy, limit, startAfter, documentId,
         getAuth, signInAnonymously, onAuthStateChanged
       };
+
+      // Notifica que o Firebase está pronto — o App React/Babel aguarda este evento
+      window.dispatchEvent(new Event("firebase-lib-ready"));
     </script>
     <style>
       body { font-family: 'Inter', sans-serif; }
@@ -1582,6 +1585,7 @@
       const App = () => {
         const [db, setDb] = useState(null);
         const [authReady, setAuthReady] = useState(false);
+        const [fbLibReady, setFbLibReady] = useState(!!window.FirebaseLib);
         const [firebaseError, setFirebaseError] = useState(null);
         const [panelUser, setPanelUser] = useState(() => {
           try {
@@ -1591,9 +1595,45 @@
           }
         });
 
+        // Aguarda window.FirebaseLib ficar disponível (script type="module" é deferred)
+        useEffect(() => {
+          if (fbLibReady) return;
+
+          if (window.FirebaseLib) {
+            setFbLibReady(true);
+            return;
+          }
+
+          let fired = false;
+          const onReady = () => {
+            if (fired) return;
+            fired = true;
+            setFbLibReady(true);
+          };
+
+          window.addEventListener('firebase-lib-ready', onReady);
+
+          // Timeout de 10 segundos — se o módulo Firebase não carregar, mostra erro
+          const tid = setTimeout(() => {
+            if (!fired) {
+              fired = true;
+              window.removeEventListener('firebase-lib-ready', onReady);
+              setFirebaseError('Erro ao carregar Firebase. Abra o console para detalhes.');
+              console.error('[Meu Acerto] FirebaseLib não carregou após 10s. Verifique rede, CDN gstatic ou bloqueador de scripts.');
+            }
+          }, 10000);
+
+          return () => {
+            if (!fired) {
+              window.removeEventListener('firebase-lib-ready', onReady);
+              clearTimeout(tid);
+            }
+          };
+        }, [fbLibReady]);
+
         useEffect(() => {
           const fb = window.FirebaseLib;
-          if (!fb) return;
+          if (!fb || !fbLibReady) return;
 
           // Evita inicializar o Firebase duas vezes
           if (!window._meuAcertoApp) {
@@ -1654,7 +1694,7 @@
             setDb(dbInstance);
             setAuthReady(true);
           }
-        }, []);
+        }, [fbLibReady]);
 
         const handleSelectUser = (u) => {
           setPanelUser(u);
@@ -1671,7 +1711,7 @@
         };
 
         // Tela de carregamento enquanto Firebase/Auth não estão prontos
-        if (!authReady || !db) {
+        if (!fbLibReady || !authReady || !db) {
           return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
               <div className="w-10 h-10 border-4 border-slate-300 border-t-indigo-500 rounded-full animate-spin mb-4" />
